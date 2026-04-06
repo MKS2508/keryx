@@ -1,6 +1,22 @@
 {
-  "current_version": "0.2.0",
+  "current_version": "0.2.1",
   "versions": [
+    {
+      "version": "0.2.1",
+      "date": "2026-04-06",
+      "type": "patch",
+      "title": "Improvements and optimizations",
+      "changes": [
+        {
+          "type": "improvement",
+          "title": "chore: bump version to 0.2.1",
+          "description": "chore: bump version to 0.2.1"
+        }
+      ],
+      "technical_notes": "",
+      "breaking_changes": [],
+      "commit_hash": "208b7673274cd25ea8f97466c60961c33cca15c7"
+    },
     {
       "version": "0.2.0",
       "date": "2026-04-06",
