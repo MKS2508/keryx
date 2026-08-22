@@ -63,6 +63,7 @@
     "@mks2508/better-logger": "0.18.2-alpha.1",
     "@mks2508/no-throw": "^0.1.0",
     "@openrouter/sdk": "^0.10.2",
+    "arktype": "^2.2.3",
     "groq-sdk": "^1.1.2",
     "octokit": "^5.0.5",
     "simple-git": "^3.33.0"
