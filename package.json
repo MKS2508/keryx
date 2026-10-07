@@ -1,7 +1,7 @@
 {
-  "name": "gemini-commit-wizard",
-  "version": "2.1.1",
-  "description": "AI-powered Git commit generation with multi-provider support (Gemini, Groq, OpenRouter)",
+  "name": "keryx",
+  "version": "3.0.0",
+  "description": "AI-powered Git commit generation with multi-provider support and release-note trailers (Gemini, Groq, OpenRouter)",
   "main": "src/commit-generator.ts",
   "type": "module",
   "exports": {
@@ -43,12 +43,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/MKS2508/gemini-commit-wizard.git"
+    "url": "https://github.com/MKS2508/keryx.git"
   },
   "bugs": {
-    "url": "https://github.com/MKS2508/gemini-commit-wizard/issues"
+    "url": "https://github.com/MKS2508/keryx/issues"
   },
-  "homepage": "https://github.com/MKS2508/gemini-commit-wizard#readme",
+  "homepage": "https://github.com/MKS2508/keryx#readme",
   "engines": {
     "bun": ">=1.0.0",
     "node": ">=18.0.0"
@@ -77,9 +77,9 @@
     "LICENSE"
   ],
   "bin": {
-    "gemini-commit": "./src/commit-generator.ts",
-    "gemini-commit-gen": "./src/commit-generator.ts",
-    "gemini-commit-init": "./src/setup-wizard.ts",
-    "gemini-version": "./src/version-manager.ts"
+    "keryx": "./src/commit-generator.ts",
+    "keryx-gen": "./src/commit-generator.ts",
+    "keryx-init": "./src/setup-wizard.ts",
+    "keryx-version": "./src/version-manager.ts"
   }
 }

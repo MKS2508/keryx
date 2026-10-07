@@ -149,7 +149,7 @@ describe('CLI — --version flag', () => {
     it('prints version to stdout and exits 0', () => {
         const r = spawnSync('bun', [WIZARD_PATH, '--version'], { encoding: 'utf-8' });
         expect(r.status).toBe(0);
-        expect(r.stdout).toMatch(/^gemini-commit-wizard v\d+\.\d+\.\d+/);
+        expect(r.stdout).toMatch(/^keryx v\d+\.\d+\.\d+/);
         // no human noise on stderr
         expect(r.stderr).not.toContain('Commit Wizard');
     });
@@ -157,7 +157,7 @@ describe('CLI — --version flag', () => {
     it('-V also prints version', () => {
         const r = spawnSync('bun', [WIZARD_PATH, '-V'], { encoding: 'utf-8' });
         expect(r.status).toBe(0);
-        expect(r.stdout).toMatch(/^gemini-commit-wizard v\d+\.\d+\.\d+/);
+        expect(r.stdout).toMatch(/^keryx v\d+\.\d+\.\d+/);
     });
 });
 

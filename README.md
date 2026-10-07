@@ -1,15 +1,15 @@
 <div align="center">
 
-# Gemini Commit Wizard
+# Keryx
 
 **AI-Powered Git Commit Generation with Multi-Provider Support**
 
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
-[![npm](https://img.shields.io/npm/v/gemini-commit-wizard?style=for-the-badge&logo=npm)](https://www.npmjs.com/package/gemini-commit-wizard)
+[![npm](https://img.shields.io/npm/v/keryx?style=for-the-badge&logo=npm)](https://www.npmjs.com/package/keryx)
 [![Bun](https://img.shields.io/badge/Bun-1.0+-ff69b4?style=for-the-badge&logo=bun)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue?style=for-the-badge&logo=typescript)](https://typescriptlang.org)
 
-*Transform your git workflow with intelligent commit generation powered by multiple AI providers*
+*Formerly `gemini-commit-wizard`. Transform your git workflow with intelligent commit generation powered by multiple AI providers*
 
 </div>
 
@@ -20,10 +20,11 @@
 - **Multi-Provider AI**: Choose between Gemini SDK, Groq, OpenRouter (300+ models), or Gemini CLI
 - **Auto-Detection**: Automatically selects the best available provider from your environment
 - **Per-Project Config**: `.commit-wizard.json` for project-specific context, components, and preferences
-- **Interactive UI**: Native dialogs on macOS/Linux with terminal fallback
+- **Agent-First**: `--agent`/`--ci` mode, JSON envelopes on stdout, meaningful exit codes
 - **Structured Commits**: Consistent format with `<technical>` and `<changelog>` sections
 - **Multi-Commit Support**: Automatically separates logical changes into multiple commits
-- **Auto-Execution**: One-click commit generation and push
+- **Staging Controls**: `--staged-only` / `--all` / `--add <files>` instead of blanket `git add -A`
+- **Push Safety**: Push is opt-in (`--confirm-push`), protected branches ask twice
 - **Version Management**: Semantic versioning with automated changelog generation
 - **Cross-Platform**: Works on macOS, Linux, and Windows
 
@@ -53,37 +54,37 @@
 
 ```bash
 # Install as a dependency in your project
-npm install gemini-commit-wizard
+npm install keryx
 # or
-bun add gemini-commit-wizard
+bun add keryx
 
 # Or clone for standalone use
-git clone https://github.com/MKS2508/gemini-commit-wizard.git
-cd gemini-commit-wizard
+git clone https://github.com/MKS2508/keryx.git
+cd keryx
 bun install
 ```
 
 ### Basic Usage
 
 ```bash
-# Interactive commit generation (auto-detects provider)
-bun src/commit-ui.ts
-
-# Quick mode without prompts
-bun src/commit-ui.ts --quick
+# Headless commit generation (auto-detects provider)
+keryx
 
 # Use a specific provider
-bun src/commit-ui.ts --provider groq
+keryx --provider groq
 
 # Use a specific provider + model
-bun src/commit-generator.ts --provider openrouter --model anthropic/claude-sonnet-4
+keryx --provider openrouter --model anthropic/claude-sonnet-4
 
 # Auto-approve without confirmation
-bun src/commit-generator.ts --auto-approve --no-push
+keryx --auto-approve --no-push
 
 # List available providers and their status
-bun src/commit-generator.ts --list-providers
+keryx --list-providers
 ```
+
+When running from a checkout instead of an installed bin, use
+`bun src/commit-generator.ts [options]`.
 
 ### Usage as npm dependency
 
@@ -92,9 +93,8 @@ When installed as a project dependency, invoke via bun:
 ```bash
 # In your package.json scripts:
 {
-  "commit": "bun node_modules/gemini-commit-wizard/src/commit-ui.ts",
-  "commit:quick": "bun node_modules/gemini-commit-wizard/src/commit-ui.ts --quick",
-  "commit:auto": "bun node_modules/gemini-commit-wizard/src/commit-generator.ts --auto-approve --no-push"
+  "commit": "bun node_modules/keryx/src/commit-generator.ts",
+  "commit:auto": "bun node_modules/keryx/src/commit-generator.ts --auto-approve --no-push"
 }
 ```
 
@@ -184,8 +184,7 @@ OAuth2 authentication with Google for seamless user login
 ### Commit Generation
 
 ```bash
-bun src/commit-ui.ts [options]
-bun src/commit-generator.ts [options]
+keryx [options]
 ```
 
 | Option | Description | Values |
@@ -193,19 +192,23 @@ bun src/commit-generator.ts [options]
 | `--provider` | AI provider to use | `gemini-sdk`, `groq`, `openrouter`, `gemini-cli` |
 | `--model` | Override default model | Any model ID supported by the provider |
 | `--context` | Describe the work being done | Any descriptive text |
+| `--context-file` | Read context from a file | Path |
 | `--work-type` | Type of work | `feature`, `fix`, `refactor`, `docs`, `test` |
 | `--affected-components` | Components changed | Comma-separated list |
-| `--auto-approve` | Skip confirmation | Boolean flag |
-| `--no-push` | Don't push to remote | Boolean flag |
+| `--staged-only` / `--all` / `--add` | Staging mode | Mutually exclusive |
+| `--agent` / `--ci` | Non-interactive, error on ambiguity | Boolean flag |
+| `--auto-approve` | Execute proposed commits | Boolean flag |
+| `--confirm-push` | Opt into push (with confirmation) | Boolean flag |
+| `--dry-run` | Show proposals, execute nothing | Boolean flag |
+| `--json` | JSON envelope on stdout | Boolean flag |
 | `--list-providers` | Show available providers | Boolean flag |
-| `--quick` | Quick mode (commit-ui only) | Boolean flag |
 
 Environment variable `COMMIT_WIZARD_PROVIDER` can also be used to set the default provider.
 
 ### Version Management
 
 ```bash
-bun src/version-manager.ts [options]
+keryx-version [options]
 ```
 
 | Option | Description |
@@ -218,41 +221,31 @@ bun src/version-manager.ts [options]
 ## Project Structure
 
 ```
-gemini-commit-wizard/
+keryx/
 ├── src/
-│   ├── providers.ts          # Multi-provider AI abstraction layer
+│   ├── providers/            # Multi-provider AI abstraction layer
+│   ├── types/                # Domain type definitions
+│   ├── utils/                # Terminal capabilities + output formatting
 │   ├── project-config.ts     # Project config loader (.commit-wizard.json)
-│   ├── commit-generator.ts   # Core commit generation engine
-│   ├── commit-ui.ts          # Interactive user interface
+│   ├── commit-generator.ts   # Core commit generation engine + CLI
+│   ├── staging.ts            # Staging decision + application
+│   ├── reporter.ts           # Exit codes + JSON envelopes for agents
+│   ├── setup-wizard.ts       # Interactive .commit-wizard.json generator
 │   ├── prompt-templates.ts   # AI prompt templates and response parser
 │   └── version-manager.ts    # Semantic versioning system
-├── .run/                     # WebStorm run configurations
+├── tests/                    # Vitest suite (hermetic)
 ├── .temp/                    # Generated files (git ignored)
 ├── package.json
 └── README.md
 ```
 
-## Platform Support
-
-### macOS
-- Native AppleScript dialogs for interactive UI
-- Full GUI experience with automatic detection
-
-### Linux
-- Zenity-based dialogs (install: `sudo apt install zenity`)
-- GTK integration with terminal fallback
-
-### Windows
-- Terminal-based interface
-- PowerShell compatibility
-
 ## Contributing
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Use the commit wizard to generate your commits:
+3. Use keryx to generate your commits:
    ```bash
-   bun src/commit-ui.ts
+   bun src/commit-generator.ts
    ```
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request

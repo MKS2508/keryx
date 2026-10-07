@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * Setup wizard for gemini-commit-wizard.
+ * Setup wizard for keryx.
  *
  * Interactive command that generates a `.commit-wizard.json` for the
  * current project. Auto-detects tech stack and existing config, then

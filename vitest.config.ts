@@ -1,5 +1,5 @@
 /**
- * Vitest configuration for gemini-commit-wizard.
+ * Vitest configuration for keryx.
  *
  * Runs tests against the TS source files directly (no bundling step).
  * Path aliases mirror the layout in src/ so tests can import cleanly.

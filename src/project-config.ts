@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * Loadable project configuration for gemini-commit-wizard.
+ * Loadable project configuration for keryx.
  *
  * Loads config from (in priority order):
  * 1. `.commit-wizard.json` in project root

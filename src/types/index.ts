@@ -1,5 +1,5 @@
 /**
- * Central type definitions for gemini-commit-wizard.
+ * Central type definitions for keryx.
  * @module types
  */
 

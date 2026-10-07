@@ -46,10 +46,15 @@ import type {
 } from './types/index.js';
 
 /**
- * Wizard version. Bumped on every release.
- * Keep in sync with `package.json` so `--version` reports the truth.
+ * Keryx version, read from `package.json` at startup.
+ *
+ * Previously a hardcoded constant that drifted out of sync with
+ * `package.json` on every `version-manager` bump (2.1.0 vs 2.1.1);
+ * deriving it removes that drift class entirely.
  */
-export const WIZARD_VERSION = '2.1.0';
+export const WIZARD_VERSION: string = (
+    JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8')) as { version: string }
+).version;
 
 
 /**
@@ -814,7 +819,7 @@ export class CommitGenerator {
 
         // Only show header in TTY with color
         if (useFancy && !this.options.quiet && !this.options.silent) {
-            log.header('Commit Wizard', `v${this.projectConfig.version}`);
+            log.header('Keryx', `v${this.projectConfig.version}`);
             log.divider();
         }
 
@@ -1024,12 +1029,12 @@ if (import.meta.main) {
     // v2.1: --version / -V early-exit. Writes to stdout (not stderr)
     // because agents that probe `--version` want to capture it cleanly.
     if (args.includes('--version') || args.includes('-V')) {
-        process.stdout.write(`gemini-commit-wizard v${WIZARD_VERSION}\n`);
+        process.stdout.write(`keryx v${WIZARD_VERSION}\n`);
         process.exit(ExitCode.SUCCESS);
     }
 
     if (args.includes('--help') || args.includes('-h')) {
-        log.header('Commit Wizard', 'AI-powered commit generation');
+        log.header('Keryx', 'AI-powered commit generation');
         log.blank();
         log.info('Usage: bun src/commit-generator.ts [options]');
         log.blank();
