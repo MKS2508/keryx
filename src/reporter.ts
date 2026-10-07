@@ -18,6 +18,7 @@
 import type { Result, ResultError } from '@mks2508/no-throw';
 import { isErr } from '@mks2508/no-throw';
 import type { CommitErrorCode, ICommitProposal, ICommitResult } from './types/index.js';
+import type { ITrailer } from './trailers.js';
 
 /**
  * Numeric exit codes for the CLI entry point.
@@ -67,6 +68,7 @@ export type JsonEnvelope =
             description: string;
             technical: string;
             changelog: string;
+            trailers: ITrailer[];
             files: string[];
         }>;
         providerName: string;
@@ -131,6 +133,7 @@ function slimProposal(p: ICommitProposal): {
     description: string;
     technical: string;
     changelog: string;
+    trailers: ITrailer[];
     files: string[];
 } {
     return {
@@ -138,6 +141,7 @@ function slimProposal(p: ICommitProposal): {
         description: p.description,
         technical: p.technical,
         changelog: p.changelog,
+        trailers: p.trailers ?? [],
         files: p.files ?? [],
     };
 }

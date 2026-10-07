@@ -7,6 +7,7 @@
  */
 
 import type { IGeminiPromptConfig, IStandardResponseFormat } from './types/index.js';
+import { parseTrailers, TRAILER_KEYS, type ITrailer } from './trailers.js';
 
 // Re-export types for backward compatibility
 export type { IGeminiPromptConfig as GeminiPromptConfig } from './types/index.js';
@@ -73,6 +74,7 @@ export function createCommitPrompt(config: IGeminiPromptConfig): string {
     const bodyLang = commitFormat?.bodyLanguage || 'spanish';
     const includeTech = commitFormat?.includeTechnical !== false;
     const includeChangelog = commitFormat?.includeChangelog !== false;
+    const includeTrailers = commitFormat?.includeTrailers !== false;
 
     const formatInstructions = `
 ## REGLAS DE IDIOMA Y FORMATO
@@ -80,7 +82,16 @@ export function createCommitPrompt(config: IGeminiPromptConfig): string {
 - **Descripción/body del commit**: en **${bodyLang}**
 - **Sección <technical>**: ${includeTech ? 'OBLIGATORIA — incluir siempre' : 'OMITIR'}
 - **Sección <changelog>**: ${includeChangelog ? 'OBLIGATORIA — incluir siempre' : 'OMITIR'}
-`;
+- **Sección <trailers>**: ${includeTrailers ? 'SÓLO cuando aplique alguna clave (ver reglas de trailers)' : 'OMITIR'}
+${includeTrailers ? `
+## REGLAS DE TRAILERS DE RELEASE
+Al final del commit, cuando el cambio lo justifique, añade trailers en formato \`Clave: valor\` (una línea por clave). El pipeline de changelog los convierte en prosa de release:
+- \`Release-Note:\` — feat/fix con impacto visible para el usuario (una frase, cara de usuario).
+- \`Breaking:\` — el cambio rompe compatibilidad, contrato o comportamiento esperado (di qué se rompe y para quién).
+- \`Upgrade-Step:\` — actualizar exige un paso de migración (contrato, schema, config).
+- \`Security:\` — el cambio corrige o endurece seguridad.
+Si ninguna clave aplica, omite la sección \`<trailers>\` entera. Nunca inventes claves fuera de: ${TRAILER_KEYS.join(', ')}.
+` : ''}`;
 
     return `${prefix}
 ${componentsSection}
@@ -118,7 +129,13 @@ ${includeChangelog ? `
 <changelog>
 ## [Tipo] [Emoji]
 [Entrada para changelog de la app, optimizada para mostrar al usuario]
-</changelog>` : ''}
+</changelog>` : ''}${includeTrailers ? `
+<trailers>
+Release-Note: [sólo si el commit tiene impacto visible para el usuario]
+Breaking: [sólo si rompe compatibilidad o contrato]
+Upgrade-Step: [sólo si actualizar exige un paso de migración]
+Security: [sólo si es un cambio de seguridad]
+</trailers>` : ''}
 \`\`\`
 
 ### **Archivos de la Propuesta #1** (OBLIGATORIO)
@@ -157,6 +174,7 @@ export class GeminiResponseParser {
         description: string;
         technical: string;
         changelog: string;
+        trailers: ITrailer[];
         files: string[];
     }> {
         const proposals: Array<{
@@ -164,6 +182,7 @@ export class GeminiResponseParser {
             description: string;
             technical: string;
             changelog: string;
+            trailers: ITrailer[];
             files: string[];
         }> = [];
 
@@ -280,6 +299,7 @@ export class GeminiResponseParser {
         description: string;
         technical: string;
         changelog: string;
+        trailers: ITrailer[];
         files: string[];
     } | null {
         const lines = content.split('\n');
@@ -299,6 +319,7 @@ export class GeminiResponseParser {
         let description = '';
         let technical = '';
         let changelog = '';
+        let trailersRaw = '';
         let currentSection = 'description';
 
         for (let i = titleIndex + 1; i < lines.length; i++) {
@@ -316,6 +337,12 @@ export class GeminiResponseParser {
             } else if (line.includes('</changelog>')) {
                 currentSection = 'none';
                 continue;
+            } else if (line.includes('<trailers>')) {
+                currentSection = 'trailers';
+                continue;
+            } else if (line.includes('</trailers>')) {
+                currentSection = 'none';
+                continue;
             }
 
             if (currentSection === 'description' && line.trim()) {
@@ -324,6 +351,8 @@ export class GeminiResponseParser {
                 technical += line + '\n';
             } else if (currentSection === 'changelog') {
                 changelog += line + '\n';
+            } else if (currentSection === 'trailers') {
+                trailersRaw += line + '\n';
             }
         }
 
@@ -332,6 +361,7 @@ export class GeminiResponseParser {
             description: description.trim(),
             technical: technical.trim(),
             changelog: changelog.trim(),
+            trailers: parseTrailers(trailersRaw),
             files: [],
         };
     }

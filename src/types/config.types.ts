@@ -29,6 +29,8 @@ export interface ICommitFormat {
     includeTechnical?: boolean;
     /** Whether to include changelog section */
     includeChangelog?: boolean;
+    /** Whether to propose release-note trailers (Release-Note, Breaking, ...) */
+    includeTrailers?: boolean;
 }
 
 /**

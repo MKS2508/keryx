@@ -37,6 +37,16 @@ export {
     GeminiResponseParser,
 } from './prompt-templates.js';
 
+// ─── Trailers ────────────────────────────────────────────────
+export {
+    TRAILER_KEYS,
+    parseTrailers,
+    formatTrailersBlock,
+    missingReleaseNoteWarnings,
+    type TrailerKey,
+    type ITrailer,
+} from './trailers.js';
+
 // ─── Types (re-exported from src/types/) ─────────────────────
 export type {
     // Provider

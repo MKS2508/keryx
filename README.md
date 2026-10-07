@@ -22,6 +22,7 @@
 - **Per-Project Config**: `.commit-wizard.json` for project-specific context, components, and preferences
 - **Agent-First**: `--agent`/`--ci` mode, JSON envelopes on stdout, meaningful exit codes
 - **Structured Commits**: Consistent format with `<technical>` and `<changelog>` sections
+- **Release-Note Trailers**: Proposes `Release-Note:` / `Breaking:` / `Upgrade-Step:` / `Security:` trailers so a deterministic changelog pipeline (styx-style `release:plan`) can turn commit bodies into release prose
 - **Multi-Commit Support**: Automatically separates logical changes into multiple commits
 - **Staging Controls**: `--staged-only` / `--all` / `--add <files>` instead of blanket `git add -A`
 - **Push Safety**: Push is opt-in (`--confirm-push`), protected branches ask twice
@@ -157,6 +158,7 @@ refactor(db): optimize query for user lookup
 | `bodyLanguage` | `english`, `spanish`, etc. | Language for commit description |
 | `includeTechnical` | `true`/`false` | Include `<technical>` section |
 | `includeChangelog` | `true`/`false` | Include `<changelog>` section |
+| `includeTrailers` | `true`/`false` | Propose release-note trailers when justified |
 
 ## Commit Format
 
@@ -177,7 +179,25 @@ Adds complete OAuth2 authentication flow with Google provider.
 ## [New]
 OAuth2 authentication with Google for seamless user login
 </changelog>
+
+Release-Note: login with your Google account
 ```
+
+### Release-Note Trailers
+
+When a change justifies it, keryx appends git trailers at the end of the
+commit message. A downstream changelog pipeline reads them to build the
+release notes deterministically — no AI in the release path:
+
+| Trailer | When |
+|---------|------|
+| `Release-Note:` | feat/fix with user-visible impact (one user-facing sentence) |
+| `Breaking:` | breaks compatibility, contract, or expected behavior |
+| `Upgrade-Step:` | upgrading requires a migration step (contract, schema, config) |
+| `Security:` | fixes or hardens security |
+
+A feat/fix proposal without a `Release-Note:` triggers a warning (never a
+block) — the release changelog would have no prose for that commit.
 
 ## CLI Reference
 

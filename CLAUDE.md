@@ -77,7 +77,19 @@ keryx/
 ## [Type] [Emoji]
 [User-facing changelog entry]
 </changelog>
+
+Release-Note: [user-facing sentence, when justified]
 ```
+
+### Release-Note Trailers
+
+`src/trailers.ts` owns the trailer vocabulary: `Release-Note`, `Breaking`,
+`Upgrade-Step`, `Security` (one `Key: value` line each, appended at the end
+of the commit message, git trailer convention). The key set mirrors the
+styx changelog pipeline (`scripts/release/version.ts` `trailers()`) — do not
+diverge. feat/fix proposals without `Release-Note` get an advisory WARN via
+`missingReleaseNoteWarnings()`; nothing is ever blocked. Toggle with
+`commitFormat.includeTrailers`.
 
 ### Valid Types
 - `feat(` - New functionality

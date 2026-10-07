@@ -16,6 +16,7 @@ import logger from '@mks2508/better-logger';
 const log = logger;
 import { ok, err, isErr, tryCatchAsync, type Result, type ResultError } from '@mks2508/no-throw';
 import { createCommitPrompt, GeminiResponseParser, type GeminiPromptConfig } from './prompt-templates';
+import { formatTrailersBlock, missingReleaseNoteWarnings } from './trailers.js';
 import { createProvider, listProviders } from './providers/index.js';
 import { loadProjectConfig } from './project-config';
 import { detectTerminalCapabilities, formatProviderBadge, shouldUseFancyOutput, type ITerminalCapabilities } from './utils/index.js';
@@ -537,6 +538,7 @@ export class CommitGenerator {
             description: p.description,
             technical: p.technical,
             changelog: p.changelog,
+            trailers: p.trailers ?? [],
             files: p.files ?? [],
         }));
     }
@@ -617,10 +619,15 @@ export class CommitGenerator {
 
             // F22: build commit message and write to temp file to avoid
             // shell escaping bugs. Use `git commit -F <file>`.
+            // Trailers go last (git trailer convention) so the changelog
+            // pipeline can pick them up from the commit body.
             let commitMessage = proposal.title;
             if (proposal.description) commitMessage += `\n\n${proposal.description}`;
             if (proposal.technical) commitMessage += `\n\n<technical>\n${proposal.technical}\n</technical>`;
             if (proposal.changelog) commitMessage += `\n\n<changelog>\n${proposal.changelog}\n</changelog>`;
+            if (proposal.trailers && proposal.trailers.length > 0) {
+                commitMessage += `\n\n${formatTrailersBlock(proposal.trailers)}`;
+            }
 
             const messagePath = join(this.projectRoot, '.temp', `commit-msg-${Date.now()}.txt`);
             writeFileSync(messagePath, commitMessage, 'utf-8');
@@ -914,6 +921,13 @@ export class CommitGenerator {
             return err({ type: 'PARSE_ERROR', message: 'No valid commit proposals parsed' } as any);
         }
 
+        // Advisory, never blocking: a feat/fix proposal without a
+        // Release-Note trailer leaves the release changelog without
+        // prose for that commit.
+        for (const warning of missingReleaseNoteWarnings(proposals)) {
+            log.warn(warning);
+        }
+
         // Show proposals - use simple format in CI, fancy in TTY
         if (useFancy) {
             log.cliTable(proposals.map((p, i) => ({
@@ -931,7 +945,7 @@ export class CommitGenerator {
         if (useFancy) {
             for (const p of proposals) {
                 log.box(
-                    [p.title, '', p.description, p.technical ? `\n<technical>\n${p.technical}\n</technical>` : '', p.changelog ? `\n<changelog>\n${p.changelog}\n</changelog>` : ''].filter(Boolean).join('\n'),
+                    [p.title, '', p.description, p.technical ? `\n<technical>\n${p.technical}\n</technical>` : '', p.changelog ? `\n<changelog>\n${p.changelog}\n</changelog>` : '', p.trailers?.length ? `\n${formatTrailersBlock(p.trailers)}` : ''].filter(Boolean).join('\n'),
                     { title: `Commit #${proposals.indexOf(p) + 1}`, borderStyle: 'single', padding: 1 },
                 );
             }

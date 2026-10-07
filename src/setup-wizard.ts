@@ -51,6 +51,7 @@ export interface ISetupWizardInput {
         bodyLanguage?: string;
         includeTechnical?: boolean;
         includeChangelog?: boolean;
+        includeTrailers?: boolean;
     };
     provider?: 'gemini-sdk' | 'groq' | 'openrouter' | 'gemini-cli';
     model?: string;
@@ -303,6 +304,12 @@ function buildQuestions(
             default: detected.commitFormat?.includeChangelog ?? true,
         },
         {
+            key: 'includeTrailers',
+            type: 'confirm',
+            message: 'Propose release-note trailers (Release-Note/Breaking/Upgrade-Step/Security) when justified?',
+            default: detected.commitFormat?.includeTrailers ?? true,
+        },
+        {
             key: 'noPush',
             type: 'confirm',
             message: 'Default to --no-push (require --confirm-push to push)?',
@@ -394,6 +401,7 @@ export async function runSetupWizard(options: {
                 titleLanguage: merged.commitFormat?.titleLanguage ?? 'english',
                 bodyLanguage: merged.commitFormat?.bodyLanguage ?? 'spanish',
                 includeChangelog: merged.commitFormat?.includeChangelog ?? true,
+                includeTrailers: merged.commitFormat?.includeTrailers ?? true,
                 noPush: override.noPush ?? true,
             };
         }
@@ -412,6 +420,7 @@ export async function runSetupWizard(options: {
                 bodyLanguage: String(answers.bodyLanguage ?? 'spanish'),
                 includeTechnical: merged.commitFormat?.includeTechnical ?? true,
                 includeChangelog: Boolean(answers.includeChangelog ?? true),
+                includeTrailers: Boolean(answers.includeTrailers ?? merged.commitFormat?.includeTrailers ?? true),
             },
             provider: (merged.provider ?? 'groq') as IProjectConfig['provider'],
             model: merged.model,
