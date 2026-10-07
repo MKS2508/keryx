@@ -1061,7 +1061,8 @@ if (import.meta.main) {
     if (args.includes('--help') || args.includes('-h')) {
         log.header('Keryx', 'AI-powered commit generation');
         log.blank();
-        log.info('Usage: bun src/commit-generator.ts [options]');
+        log.info('Usage: keryx [options]');
+        log.info('       keryx release-notes [options]');
         log.blank();
         log.info('Options:');
         log.info('  --provider <name>            Provider: gemini-cli|gemini-sdk|groq|openrouter');
@@ -1083,6 +1084,10 @@ if (import.meta.main) {
         log.info('  --list-providers             Show available providers');
         log.info('  --version, -V                Print version and exit');
         log.info('  --help, -h                   Show this help');
+        log.blank();
+        log.info('Subcommands:');
+        log.info('  release-notes                Propose missing release-note trailers for a styx');
+        log.info('                               release plan (see keryx release-notes --help)');
         log.blank();
         log.info('Staging modes (mutually exclusive):');
         log.info('  --staged-only                Only use files already in the index');
