@@ -29,6 +29,7 @@ export interface IGeminiPromptConfig {
         bodyLanguage?: string;
         includeTechnical?: boolean;
         includeChangelog?: boolean;
+        includeTrailers?: boolean;
     };
 }
 

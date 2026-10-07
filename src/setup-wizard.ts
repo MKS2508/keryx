@@ -21,7 +21,7 @@ import { join, basename } from 'path';
 import logger from '@mks2508/better-logger';
 // Alias so the file's existing `log.xxx(...)` call sites stay unchanged.
 const log = logger;
-import { tryCatchAsync, type Result } from '@mks2508/no-throw';
+import { tryCatchAsync, type Result, type ResultError } from '@mks2508/no-throw';
 import { loadProjectConfig } from './project-config.js';
 import type { IProjectConfig, IProjectComponent } from './types/index.js';
 
@@ -351,7 +351,7 @@ export async function runSetupWizard(options: {
     dryRun?: boolean;
     input?: ISetupWizardInput;
     promptFn?: ISetupPromptFn;
-} = {}): Promise<Result<SetupResult, string>> {
+ } = {}): Promise<Result<SetupResult, ResultError<'SETUP_ERROR'>>> {
     return tryCatchAsync(async () => {
         const projectRoot = options.projectRoot ?? process.cwd();
         const targetPath = join(projectRoot, '.commit-wizard.json');
@@ -468,14 +468,12 @@ async function defaultPrompt(questions: ISetupQuestion[]): Promise<Record<string
                 answers[q.key] = await select({
                     message: q.message,
                     choices: q.choices ?? [],
-                    default: q.default as string | undefined,
                 });
                 break;
             case 'checkbox':
                 answers[q.key] = await checkbox({
                     message: q.message,
                     choices: q.choices ?? [],
-                    default: q.default as string[] | undefined,
                 });
                 break;
             case 'confirm':

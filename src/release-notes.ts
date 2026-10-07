@@ -294,7 +294,7 @@ export interface IReleaseNotesDeps {
     /** Full commit body for a sha (`git log -1 --format=%B <sha>`) */
     gitBody: (styxRoot: string, sha: string) => string;
     /** Files ADDED by a sha (`git show --diff-filter=A --name-only --format= <sha>`) */
-    gitFiles: (styxRoot: string, sha: string) => string;
+    gitFiles: (styxRoot: string, sha: string) => string[];
     /** Provider factory */
     createProvider: (name?: string, model?: string) => IAIProvider;
 }

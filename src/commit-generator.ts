@@ -190,7 +190,8 @@ export class CommitGenerator {
         if (options.silent || options.json) {
             log.setVerbosity('silent');
         } else if (options.quiet) {
-            log.setVerbosity('quiet');
+            // Verbosity has no 'quiet' — errors-only is the closest level.
+            log.setVerbosity('error');
         } else if (options.verbose) {
             log.setVerbosity('debug');
         }
@@ -603,7 +604,7 @@ export class CommitGenerator {
         if (isErr(validated)) return validated;
 
         return tryCatchAsync(async () => {
-            const targetFiles = proposal.files;
+            const targetFiles = validated.value;
 
             for (const file of targetFiles) {
                 const addResult = await this.gitCommand(['add', '--', file]);
@@ -724,12 +725,12 @@ export class CommitGenerator {
             );
         } else {
             const { confirm } = await import('@inquirer/prompts');
-            const ok = await confirm({
+            const confirmed = await confirm({
                 message: `Push ${commitCount} commit(s) to ${remote}/${currentBranch}?` +
                     (isProtectedBranch ? ' [PROTECTED BRANCH]' : ''),
                 default: false,
             });
-            if (!ok) {
+            if (!confirmed) {
                 log.info('Push cancelled by user');
                 return ok(false);
             }

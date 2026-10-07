@@ -129,6 +129,7 @@ export type CommitErrorCode =
     | 'PARSE_ERROR'
     | 'CONFIG_ERROR'
     | 'STAGING_ERROR'
+    | 'PUSH_CANCELLED'
     | 'COMMIT_EXEC_ERROR'
     | 'NO_CHANGES'
     | 'CANCELLED';
