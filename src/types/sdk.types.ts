@@ -3,7 +3,7 @@
  * @module types/sdk
  */
 
-import type { ProviderName } from './provider.types.js';
+import type { IAIProvider, ProviderName } from './provider.types.js';
 import type { ICommitProposal } from './commit.types.js';
 import type { Result } from '@mks2508/no-throw';
 
@@ -35,6 +35,12 @@ export interface ICommitGeneratorOptions {
     provider?: ProviderName;
     /** Override the default model for the selected provider */
     model?: string;
+    /**
+     * Pre-built provider instance. Wins over `provider`/`model` and skips
+     * the factory + availability check entirely — the seam tests and SDK
+     * consumers use to run hermetically (no API keys, no network).
+     */
+    providerInstance?: IAIProvider;
     /**
      * Auto-approve commit proposals without prompting.
      * @defaultValue false (in v2.0; was true in v1.x)

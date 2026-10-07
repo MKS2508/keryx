@@ -5,6 +5,25 @@
 
 /**
  * Supported AI provider identifiers.
+ *
+ * ## Adding future providers (agy, Jev)
+ *
+ * The factory (`src/providers/index.ts` `PROVIDER_MAP`) is the only
+ * registration point — one entry per name mapping to a
+ * `(model?) => IAIProvider` factory. Two providers are planned for v3.x:
+ *
+ * - **`agy`** — the Gemini CLI-based agent runtime. CLI-provider shape:
+ *   copy the `GeminiCliProvider` pattern (`src/providers/gemini-cli.ts`) —
+ *   `isAvailable()` probes the binary, `generate()` pipes the prompt to
+ *   the CLI over stdin via `Bun.spawnSync` and returns stdout.
+ * - **`jev`** — typesafe.ai. SDK-provider shape: copy the
+ *   `GeminiSdkProvider` pattern (`src/providers/gemini-sdk.ts`) —
+ *   `isAvailable()` checks the env key, `generate()` awaits the SDK call.
+ *
+ * In both cases: add the id to this union, the class to `src/providers/`,
+ * the entry in `PROVIDER_MAP` + `AUTO_DETECT_ORDER` (if it should
+ * auto-detect), and a `getProviderRequirement` string so the failure
+ * message tells the user what to install.
  */
 export type ProviderName = 'gemini-cli' | 'gemini-sdk' | 'groq' | 'openrouter';
 

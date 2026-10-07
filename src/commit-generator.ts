@@ -209,9 +209,12 @@ export class CommitGenerator {
 
         this.projectConfig = loadProjectConfig(this.projectRoot);
 
+        // providerInstance is the hermetic seam: a pre-built provider
+        // (test double or SDK consumer's own) skips the factory and the
+        // availability check entirely.
         const resolvedProvider = options.provider || this.projectConfig.provider;
         const resolvedModel = options.model || this.projectConfig.model;
-        this.provider = createProvider(resolvedProvider, resolvedModel);
+        this.provider = options.providerInstance ?? createProvider(resolvedProvider, resolvedModel);
 
         // Subtle provider badge instead of loud message
         if (!options.quiet && !options.silent) {
