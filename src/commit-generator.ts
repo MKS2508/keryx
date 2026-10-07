@@ -17,6 +17,7 @@ const log = logger;
 import { ok, err, isErr, tryCatchAsync, type Result, type ResultError } from '@mks2508/no-throw';
 import { createCommitPrompt, GeminiResponseParser, type GeminiPromptConfig } from './prompt-templates';
 import { formatTrailersBlock, missingReleaseNoteWarnings } from './trailers.js';
+import { runReleaseNotesCli } from './release-notes.js';
 import { createProvider, listProviders } from './providers/index.js';
 import { loadProjectConfig } from './project-config';
 import { detectTerminalCapabilities, formatProviderBadge, shouldUseFancyOutput, type ITerminalCapabilities } from './utils/index.js';
@@ -1040,6 +1041,12 @@ export class CommitGenerator {
 if (import.meta.main) {
     const args = process.argv.slice(2);
 
+    // v3: subcommands. `release-notes` is headless and propose-only;
+    // it exits internally, never falling through to commit generation.
+    if (args[0] === 'release-notes') {
+        await runReleaseNotesCli(args.slice(1));
+    }
+
     // v2.1: --version / -V early-exit. Writes to stdout (not stderr)
     // because agents that probe `--version` want to capture it cleanly.
     if (args.includes('--version') || args.includes('-V')) {
@@ -1127,7 +1134,9 @@ if (import.meta.main) {
         const envelope = buildJsonEnvelope(result, options.dryRun ?? false);
         writeJson(envelope);
     } else if (isErr(result)) {
-        log.error(result.error.message);
+        // Same write-then-exit hazard as release-notes: log.error's async
+        // write is dropped when stderr is a pipe, so write synchronously.
+        process.stderr.write(`${result.error.message}\n`);
     }
 
     // v2.1: map the domain error to a distinct exit code so agents

@@ -21,6 +21,26 @@
 export { CommitGenerator, WIZARD_VERSION } from './commit-generator.js';
 export { VersionManager } from './version-manager.js';
 
+// ─── Release Notes ───────────────────────────────────────────
+export {
+    runReleaseNotes,
+    runReleaseNotesCli,
+    detectMissingTrailers,
+    planCommits,
+    parseTrailerProposals,
+    buildTrailerPrompt,
+    renderReleaseNotesMarkdown,
+    defaultDeps as releaseNotesDefaultDeps,
+    type IReleaseNotesOptions,
+    type IReleaseNotesDeps,
+    type IReleaseNotesReport,
+    type ITrailerCandidate,
+    type IStyxPlan,
+    type IStyxPlanComponent,
+    type IStyxPlanReason,
+    type StyxLevel,
+} from './release-notes.js';
+
 // ─── Provider System ─────────────────────────────────────────
 export { createProvider, listProviders } from './providers/index.js';
 export { GeminiSdkProvider } from './providers/gemini-sdk.js';

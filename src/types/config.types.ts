@@ -55,4 +55,9 @@ export interface IProjectConfig {
     provider?: ProviderName;
     /** Preferred AI model */
     model?: string;
+    /** Target repos for subcommands (e.g. the styx checkout for release-notes) */
+    styx?: {
+        /** Absolute or cwd-relative path to the styx checkout */
+        root?: string;
+    };
 }

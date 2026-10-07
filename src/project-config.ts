@@ -89,6 +89,7 @@ function fillDefaults(partial: Partial<IProjectConfig>): IProjectConfig {
         },
         provider: partial.provider,
         model: partial.model,
+        styx: partial.styx,
     };
 }
 

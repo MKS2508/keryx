@@ -128,6 +128,23 @@ Changelog entry
 **DECISION**: [Why single vs multiple commits]
 ```
 
+## release-notes subcommand
+
+`keryx release-notes` (src/release-notes.ts) proposes missing release-note
+trailers for the commits of a styx release plan. Contract with styx is
+JSON-over-subprocess: shell out to `bun run release:plan --json` in the
+styx root (`--styx-root` flag or `styx.root` in .commit-wizard.json), read
+commit bodies with plain git. NEVER import styx code.
+
+Propose-only, always: keryx never amends commits nor writes changelogs —
+prose enters styx through the release PR (dec-0123 D5 posture). Detection
+(`missingTrailersFor`) mirrors styx semantics: feat/fix → Release-Note,
+`!` → Breaking, `sec` → Security, ADDED `migrations/*.sql` → Upgrade-Step.
+Range passthrough `--from/--to/--prerelease` exists because tag-less
+histories plan from root and produce unbounded candidate sets. Deps
+(`runPlan`/`gitBody`/`gitFiles`/`createProvider`) are injectable — tests
+run with an embedded plan fixture, no subprocess.
+
 ## Commands
 
 ```bash

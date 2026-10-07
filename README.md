@@ -201,6 +201,26 @@ block) — the release changelog would have no prose for that commit.
 
 ## CLI Reference
 
+### Release Notes (propose-only)
+
+```bash
+keryx release-notes --styx-root <path> [--from <rev>] [--to <rev>] [--prerelease alpha] [--json] [--dry-run]
+```
+
+Analyzes the commits of a styx release plan (`bun run release:plan --json`,
+JSON-over-subprocess — no styx code is imported) and proposes the
+release-note trailers they are missing, via the configured provider. Output:
+human markdown, or a JSON envelope with `--json`.
+
+- The styx checkout path comes from `--styx-root` or `"styx": { "root": "..." }`
+  in `.commit-wizard.json`.
+- **Never writes**: keryx does not amend commits and does not touch
+  changelogs. The prose enters the repo through a release PR reviewed by a
+  human (`--dry-run` is the documented posture and the only mode).
+- Bound the range with `--from`/`--to`/`--prerelease` (passed through to
+  `release:plan`). On tag-less histories the default plan spans every
+  commit ever, which makes the candidate set unusably large.
+
 ### Commit Generation
 
 ```bash
