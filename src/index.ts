@@ -1,9 +1,9 @@
 /**
- * gemini-commit-wizard — AI-powered Git commit generation with multi-provider support.
+ * keryx — AI-powered Git commit generation with multi-provider support.
  *
  * @example
  * ```typescript
- * import { CommitGenerator, createProvider, loadProjectConfig } from 'gemini-commit-wizard';
+ * import { CommitGenerator, createProvider, loadProjectConfig } from 'keryx';
  *
  * const generator = new CommitGenerator({
  *   provider: 'groq',
@@ -14,19 +14,12 @@
  * const result = await generator.generate();
  * ```
  *
- * @module gemini-commit-wizard
+ * @module keryx
  */
 
 // ─── Core Classes ────────────────────────────────────────────
-export { CommitGenerator } from './commit-generator.js';
-export { CommitUI } from './commit-ui.js';
+export { CommitGenerator, WIZARD_VERSION } from './commit-generator.js';
 export { VersionManager } from './version-manager.js';
-export { GitHubReleaseManager } from './github-release-manager.js';
-export { AutoReleaseManagerAI } from './auto-release-gemini.js';
-
-// ─── Git SDK ─────────────────────────────────────────────────
-export { GitClient } from './git-client.js';
-export type { IGitClientOptions } from './git-client.js';
 
 // ─── Provider System ─────────────────────────────────────────
 export { createProvider, listProviders } from './providers/index.js';
@@ -41,29 +34,8 @@ export { loadProjectConfig } from './project-config.js';
 // ─── Prompt Templates & Parsing ──────────────────────────────
 export {
     createCommitPrompt,
-    createWorkflowPrompt,
-    createReleasePrompt,
     GeminiResponseParser,
 } from './prompt-templates.js';
-
-// ─── Git Utilities (now with simple-git) ─────────────────────
-export {
-    parseGitStatus,
-    getFileArea,
-    areFilesRelated,
-    suggestCommitType,
-    analyzeDiff,
-    generateTechnicalSummary,
-    getGitStatus,
-    getGitDiff,
-    getGitLog,
-    gitAdd,
-    gitCommit,
-    gitPush,
-    gitPull,
-    gitFetch,
-    gitGetCurrentBranch,
-} from './git-utils.js';
 
 // ─── Types (re-exported from src/types/) ─────────────────────
 export type {
@@ -83,22 +55,14 @@ export type {
     // Prompt
     IGeminiPromptConfig,
     IStandardResponseFormat,
-    // Git
-    IGitFileStatus,
-    IGitCommitInfo,
     // Version
     IChangelogEntry,
     IVersion,
     IChangelogData,
     IVersionCommitInfo,
-    // Release
-    IReleaseInfo,
-    IVersionData,
-    IAutoReleaseInfo,
     // SDK
     ICommitGeneratorOptions,
     ICommitResult,
     CommitErrorCode,
     VersionErrorCode,
-    ReleaseErrorCode,
 } from './types/index.js';

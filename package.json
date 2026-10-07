@@ -5,13 +5,10 @@
   "main": "src/commit-generator.ts",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./cli": "./src/commit-ui.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
-    "commit": "bun src/commit-ui.ts",
-    "commit:quick": "bun src/commit-ui.ts --quick",
-    "commit:manual": "bun src/commit-generator.ts",
+    "commit": "bun src/commit-generator.ts",
     "commit:auto": "bun src/commit-generator.ts --auto-approve",
     "commit:dry": "bun src/commit-generator.ts --dry-run",
     "init": "bun src/setup-wizard.ts",
@@ -57,15 +54,12 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "^2.1.87",
     "@google/genai": "^1.47.0",
     "@inquirer/prompts": "^8.3.2",
     "@mks2508/better-logger": "0.18.2-alpha.1",
     "@mks2508/no-throw": "^0.1.0",
     "@openrouter/sdk": "^0.10.2",
-    "groq-sdk": "^1.1.2",
-    "octokit": "^5.0.5",
-    "simple-git": "^3.33.0"
+    "groq-sdk": "^1.1.2"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
@@ -83,7 +77,7 @@
     "LICENSE"
   ],
   "bin": {
-    "gemini-commit": "./src/commit-ui.ts",
+    "gemini-commit": "./src/commit-generator.ts",
     "gemini-commit-gen": "./src/commit-generator.ts",
     "gemini-commit-init": "./src/setup-wizard.ts",
     "gemini-version": "./src/version-manager.ts"

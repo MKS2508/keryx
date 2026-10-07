@@ -22,7 +22,7 @@ import logger from '@mks2508/better-logger';
 // Alias so the file's existing `log.xxx(...)` call sites stay unchanged.
 const log = logger;
 import { tryCatchAsync, type Result } from '@mks2508/no-throw';
-import { loadProjectConfig, detectTechStack, detectPlatform } from './project-config.js';
+import { loadProjectConfig } from './project-config.js';
 import type { IProjectConfig, IProjectComponent } from './types/index.js';
 
 

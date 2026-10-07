@@ -13,18 +13,6 @@ export type { IGeminiPromptConfig as GeminiPromptConfig } from './types/index.js
 export type { IStandardResponseFormat as StandardResponseFormat } from './types/index.js';
 
 /**
- * Default project config used as fallback when no config is loaded.
- * @deprecated Use loadProjectConfig() from project-config.ts instead.
- */
-export const TPV_PROJECT_CONFIG = {
-    name: 'Unknown Project',
-    description: 'Software project',
-    version: '0.0.0',
-    techStack: ['TypeScript'] as const,
-    targetPlatform: 'Cross-platform',
-} as const;
-
-/**
  * Generate the standard prompt prefix with dynamic project context.
  * @param ctx - Project context for the prompt
  * @returns Formatted prompt prefix string
@@ -150,116 +138,6 @@ tests/staging.test.ts
 ---
 
 **DECISIÓN**: [Explicación breve de por qué uno o múltiples commits]
-
-${STANDARD_PROMPT_SUFFIX}`;
-}
-
-/**
- * Generate prompt for workflow assistant.
- * @param config - Prompt configuration with project context and data
- * @returns Formatted workflow prompt
- */
-export function createWorkflowPrompt(config: IGeminiPromptConfig): string {
-    const { data, specificContext, projectContext } = config;
-    const prefix = createPromptPrefix(projectContext);
-
-    return `${prefix}
-
-# ASISTENTE DE WORKFLOW
-
-## Solicitud del Usuario
-"${specificContext}"
-
-## Contexto del Proyecto Actual
-${JSON.stringify(data, null, 2)}
-
----
-
-## FORMATO DE RESPUESTA REQUERIDO
-
-\`\`\`markdown
-🎯 **ANÁLISIS**: [Descripción del tipo de trabajo detectado]
-📊 **IMPACTO**: [Áreas afectadas y alcance del cambio]
-🚀 **RECOMENDACIÓN**: [Tipo de versión y estrategia recomendada]
-
-## 🖥️ COMANDOS PARA macOS
-\`\`\`bash
-# [Descripción del primer comando]
-[comando exacto con parámetros]
-
-# [Descripción del segundo comando]
-[segundo comando exacto]
-\`\`\`
-
-## 🐧 COMANDOS PARA LINUX ARM (después de macOS)
-\`\`\`bash
-# SSH y preparación
-ssh user@raspberry-pi
-git pull origin master && bun install
-
-# [Descripción del build ARM]
-[comandos específicos de ARM]
-\`\`\`
-
-## ✅ VERIFICACIONES AUTOMÁTICAS
-- [Lista de verificaciones que se ejecutarán]
-\`\`\`
-
-${STANDARD_PROMPT_SUFFIX}`;
-}
-
-/**
- * Generate prompt for automatic releases.
- * @param config - Prompt configuration with project context and data
- * @returns Formatted release analysis prompt
- */
-export function createReleasePrompt(config: IGeminiPromptConfig): string {
-    const { data, specificContext, projectContext } = config;
-    const prefix = createPromptPrefix(projectContext);
-
-    return `${prefix}
-
-# ANÁLISIS DE RELEASE
-
-## Información de la Release
-${JSON.stringify(data, null, 2)}
-
-## Contexto Específico
-${specificContext || 'Release automática'}
-
----
-
-## FORMATO DE RESPUESTA REQUERIDO
-
-\`\`\`markdown
-# 📦 ANÁLISIS DE RELEASE
-
-## 🎯 RESUMEN
-[Descripción de los cambios principales incluidos en esta release]
-
-## 📋 CHANGELOG GENERADO
-
-### ✨ Features
-[Lista de nuevas funcionalidades]
-
-### 🐛 Fixes
-[Lista de correcciones de bugs]
-
-### 🚀 Improvements
-[Lista de mejoras]
-
-### 🔧 Technical
-[Cambios técnicos internos]
-
-## 🏷️ INFORMACIÓN DE VERSIÓN
-- **Versión**: [versión calculada]
-- **Prefijo**: [alpha/beta/rc/stable]
-- **Canal OTA**: [dev/beta/stable]
-- **Tipo de cambio**: [major/minor/patch]
-
-## 📝 NOTAS DE RELEASE
-[Texto descriptivo para usuarios finales]
-\`\`\`
 
 ${STANDARD_PROMPT_SUFFIX}`;
 }
@@ -455,48 +333,6 @@ export class GeminiResponseParser {
             technical: technical.trim(),
             changelog: changelog.trim(),
             files: [],
-        };
-    }
-
-    /**
-     * Parse workflow response into standard format.
-     * @param response - Raw AI workflow response
-     * @returns Parsed workflow data
-     */
-    static parseWorkflowResponse(response: string): {
-        analysis: string;
-        impact: string;
-        recommendation: string;
-        macosCommands: string[];
-        linuxCommands: string[];
-        verifications: string[];
-    } {
-        const analysisMatch = response.match(/🎯\s*\*\*ANÁLISIS\*\*:\s*(.+)/);
-        const impactMatch = response.match(/📊\s*\*\*IMPACTO\*\*:\s*(.+)/);
-        const recommendationMatch = response.match(/🚀\s*\*\*RECOMENDACIÓN\*\*:\s*(.+)/);
-
-        const macosSection = response.match(/##\s*🖥️\s*COMANDOS PARA macOS\s*```bash\s*([\s\S]*?)\s*```/);
-        const macosCommands = macosSection ? macosSection[1].split('\n').filter(line =>
-            line.trim() && !line.startsWith('#'),
-        ) : [];
-
-        const linuxSection = response.match(/##\s*🐧\s*COMANDOS PARA LINUX ARM[\s\S]*?```bash\s*([\s\S]*?)\s*```/);
-        const linuxCommands = linuxSection ? linuxSection[1].split('\n').filter(line =>
-            line.trim() && !line.startsWith('#'),
-        ) : [];
-
-        const verificationsSection = response.match(/##\s*✅\s*VERIFICACIONES AUTOMÁTICAS\s*([\s\S]*?)```/);
-        const verifications = verificationsSection ? verificationsSection[1].split('\n').filter(line =>
-            line.trim().startsWith('-'),
-        ).map(line => line.replace(/^-\s*/, '')) : [];
-
-        return {
-            analysis: analysisMatch?.[1] || 'No disponible',
-            impact: impactMatch?.[1] || 'No disponible',
-            recommendation: recommendationMatch?.[1] || 'No disponible',
-            macosCommands,
-            linuxCommands,
-            verifications,
         };
     }
 }

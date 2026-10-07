@@ -9,5 +9,3 @@ export * from './provider.types.js';
 export * from './prompt.types.js';
 export * from './sdk.types.js';
 export * from './version.types.js';
-export * from './git.types.js';
-export * from './release.types.js';
