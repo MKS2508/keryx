@@ -1,7 +1,7 @@
 {
   "name": "keryx",
   "version": "3.0.0",
-  "description": "AI-powered Git commit generation with multi-provider support and release-note trailers (Gemini, Groq, OpenRouter)",
+  "description": "AI-powered Git commit generation. v3.1 hybrid pipeline: jev (TypeSafe System One Model) classifies the diff, agy (CLI LLM) writes the commit body. Release-note trailers are also jev-refined.",
   "main": "src/commit-generator.ts",
   "type": "module",
   "exports": {
@@ -27,9 +27,13 @@
     "git",
     "commit",
     "ai",
-    "gemini",
-    "groq",
-    "openrouter",
+    "agy",
+    "jev",
+    "typesafe",
+    "decision-provider",
+    "hybrid-pipeline",
+    "release-notes",
+    "trailers",
     "claude",
     "llama",
     "multi-provider",
@@ -59,6 +63,7 @@
     "@mks2508/better-logger": "0.18.2-alpha.1",
     "@mks2508/no-throw": "^0.1.0",
     "@openrouter/sdk": "^0.10.2",
+    "@typesafe-ai/sdk": "^0.6.0",
     "groq-sdk": "^1.1.2"
   },
   "devDependencies": {
