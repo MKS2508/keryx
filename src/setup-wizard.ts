@@ -201,6 +201,21 @@ export function detectProviderPreference(): { provider: string; model: string } 
     return null;
 }
 
+/**
+ * v3.1: detect a preferred DECISION provider from environment.
+ * Today the only decision provider is jev (TypeSafe). The check is
+ * independent of `detectProviderPreference` so a user can have only
+ * the decision provider set (rare) or only the text provider set
+ * (common) without breaking the wizard. Honors both `JEV_API_KEY`
+ * (keryx convention) and `TYPESAFE_API_KEY` (SDK default).
+ */
+export function detectDecisionProviderPreference(): { decisionProvider: string } | null {
+    if (process.env.JEV_API_KEY || process.env.TYPESAFE_API_KEY) {
+        return { decisionProvider: 'jev' };
+    }
+    return null;
+}
+
 // ─── Wizard core ──────────────────────────────────────────────
 
 /**
@@ -379,6 +394,11 @@ export async function runSetupWizard(options: {
         if (providerPref) {
             detected.provider = providerPref.provider as IProjectConfig['provider'];
             detected.model = providerPref.model;
+        }
+
+        const decisionProviderPref = detectDecisionProviderPreference();
+        if (decisionProviderPref) {
+            detected.decisionProvider = decisionProviderPref.decisionProvider as IProjectConfig['decisionProvider'];
         }
 
         const override = options.input ?? {};

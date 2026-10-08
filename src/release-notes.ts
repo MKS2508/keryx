@@ -25,11 +25,12 @@ import { resolve } from 'path';
 import logger from '@mks2508/better-logger';
 const log = logger;
 import { isErr, ok, err, tryCatchAsync, type Result, type ResultError } from '@mks2508/no-throw';
-import { createProvider as defaultCreateProvider } from './providers/index.js';
+import { createProvider as defaultCreateProvider, createDecisionProvider as defaultCreateDecisionProvider } from './providers/index.js';
 import { loadProjectConfig } from './project-config.js';
 import { parseTrailers, TRAILER_KEYS, type ITrailer, type TrailerKey } from './trailers.js';
 import { ExitCode } from './reporter.js';
-import type { IAIProvider } from './types/index.js';
+import { trailerDecisionsQuestions, mapJevToTrailerDecisions } from './decisions.js';
+import type { IAIProvider, IDecisionProvider } from './types/index.js';
 
 // ─── styx plan contract (mirrored, not imported) ──────────────
 
@@ -295,8 +296,16 @@ export interface IReleaseNotesDeps {
     gitBody: (styxRoot: string, sha: string) => string;
     /** Files ADDED by a sha (`git show --diff-filter=A --name-only --format= <sha>`) */
     gitFiles: (styxRoot: string, sha: string) => string[];
-    /** Provider factory */
+    /** Provider factory (text — writes the trailer proposals) */
     createProvider: (name?: string, model?: string) => IAIProvider;
+    /**
+     * Decision provider factory (opt-in). When the returned provider
+     * is available, keryx calls it between the regex detector and
+     * the text writer to refine which trailers truly apply. Returns
+     * null when no decision provider is configured — regex detection
+     * stays the only signal.
+     */
+    createDecisionProvider: (name?: string, model?: string) => IDecisionProvider | null;
 }
 
 /** Default deps: real subprocesses. */
@@ -333,6 +342,7 @@ export const defaultDeps: IReleaseNotesDeps = {
         return r.status === 0 ? (r.stdout ?? '').split('\n').map(l => l.trim()).filter(Boolean) : [];
     },
     createProvider: defaultCreateProvider,
+    createDecisionProvider: defaultCreateDecisionProvider,
 };
 
 /**
@@ -385,7 +395,62 @@ export async function runReleaseNotes(
         bodies.set(c.sha, deps.gitBody(styxRoot, c.sha));
         files.set(c.sha, deps.gitFiles(styxRoot, c.sha));
     }
-    const candidates = detectMissingTrailers(plan, bodies, files);
+    const regexCandidates = detectMissingTrailers(plan, bodies, files);
+
+    // v3.1 hybrid: refine the regex candidates with a decision
+    // provider (jev) when one is available. jev confirms each candidate
+    // (keep), drops it (regex was wrong), or adds a Security: trailer
+    // the regex did not catch. The regex result is the fallback when
+    // jev is not configured or fails.
+    let candidates = regexCandidates;
+    let decisionProvider: IDecisionProvider | null = null;
+    try {
+        decisionProvider = deps.createDecisionProvider();
+    } catch (e) {
+        log.warn(`Decision provider unavailable: ${(e as Error).message}; using regex only`);
+    }
+
+    if (decisionProvider && regexCandidates.length > 0) {
+        const refineResult = await tryCatchAsync(async () => {
+            const questions = trailerDecisionsQuestions(
+                regexCandidates.map(c => ({
+                    sha: c.sha,
+                    type: c.component,
+                    missingTrailers: c.missing,
+                    title: c.subject,
+                })),
+            );
+            const raw = await decisionProvider!.decide<unknown>({
+                plan: { from: plan.from, to: plan.to },
+                candidates: regexCandidates.map(c => ({
+                    sha: c.sha,
+                    component: c.component,
+                    subject: c.subject,
+                    level: c.level,
+                    missing: c.missing,
+                    body: bodies.get(c.sha) ?? '',
+                })),
+            }, questions);
+            return mapJevToTrailerDecisions(
+                raw,
+                regexCandidates.map(c => c.sha),
+            );
+        }, 'PROVIDER_ERROR');
+
+        if (isErr(refineResult)) {
+            log.warn(`Decision provider failed: ${refineResult.error.message}; using regex only`);
+        } else {
+            const refined = refineResult.value;
+            candidates = regexCandidates
+                .filter(c => !refined.bySha[c.sha]?.dropped.includes('regex'))
+                .map(c => {
+                    const extra = refined.bySha[c.sha]?.confirmed.includes('add_security')
+                        ? ['Security' as TrailerKey]
+                        : [];
+                    return { ...c, missing: [...c.missing, ...extra] };
+                });
+        }
+    }
 
     let proposals: Array<{ candidate: ITrailerCandidate; trailers: ITrailer[] }> = [];
     let provider: IAIProvider;
