@@ -8,6 +8,7 @@
 
 import type { IGeminiPromptConfig, IStandardResponseFormat } from './types/index.js';
 import { parseTrailers, TRAILER_KEYS, type ITrailer } from './trailers.js';
+import { COMPLEXITY_RUBRIC } from './types/decision.types.js';
 
 // Re-export types for backward compatibility
 export type { IGeminiPromptConfig as GeminiPromptConfig } from './types/index.js';
@@ -63,11 +64,31 @@ const STANDARD_PROMPT_SUFFIX = `
  * @returns Formatted commit analysis prompt
  */
 export function createCommitPrompt(config: IGeminiPromptConfig): string {
-    const { data, specificContext, projectContext, components, commitFormat } = config;
+    const { data, specificContext, projectContext, components, commitFormat, decisions } = config;
     const prefix = createPromptPrefix(projectContext);
 
     const componentsSection = components && components.length > 0
         ? `\n## Componentes del Proyecto (Monorepo)\n${components.map(c => `- **${c.id}** → \`${c.path}\` — ${c.name}`).join('\n')}\n\nUsa el ID del componente como "área" en el prefijo del commit (ej: \`feat(web):\`, \`fix(agent-backend):\`).\n`
+        : '';
+
+    const decisionsSection = decisions
+        ? `\n## DECISIONES DEL CLASSIFIER (jev)
+
+Estas clasificaciones son la primera opinión. Úsalas como guía — puedes discrepar si tienes razón documentada en el diff.
+
+\`\`\`json
+${JSON.stringify(decisions, null, 2)}
+\`\`\`
+
+Notas de interpretación:
+- \`commit_type\`: sugerencia del prefijo Conventional Commits. Si discrepas, justifica en el body.
+- \`scope\`: ID de componente o "general". Solo aplica si la repo tiene monorepo / componentes.
+- \`breaking\` (0..1): probabilidad de que rompa contrato. Si > 0.5, incluye trailer \`Breaking:\`.
+- \`changelog_worthy\` (0..1): si > 0.5, rellena la sección \`<changelog>\` con entrada user-facing.
+- \`single_vs_multi\` (1 = un commit, 0 = varios): si < 0.5, genera varios \`### **Propuesta de Commit #N\`.
+- \`complexity\` (0..5 sobre ${COMPLEXITY_RUBRIC.join(' / ')}): si >= 3, la sección \`<technical>\` debe ser sustancial.
+
+`
         : '';
 
     const titleLang = commitFormat?.titleLanguage || 'english';
@@ -97,7 +118,7 @@ Si ninguna clave aplica, omite la sección \`<trailers>\` entera. Nunca inventes
 ${componentsSection}
 # ANÁLISIS DE COMMITS
 ${formatInstructions}
-## Datos del Análisis
+${decisionsSection}## Datos del Análisis
 ${JSON.stringify(data, null, 2)}
 
 ## Contexto Adicional
