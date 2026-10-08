@@ -137,6 +137,9 @@ function makeDeps(opts: {
         createProvider: () => mockProvider(
             opts.response instanceof Error ? (() => { throw opts.response!; })() : (opts.response ?? AI_RESPONSE),
         ),
+        // v3.1 hybrid pipeline: tests opt out of jev by default (return
+        // null). The new jev-active test passes a stub via makeDeps.
+        createDecisionProvider: () => null,
     };
 }
 

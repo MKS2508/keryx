@@ -14,6 +14,7 @@ export default defineConfig({
         environment: 'node',
         include: ['tests/**/*.test.ts'],
         exclude: ['**/node_modules/**', 'dist/**'],
+        setupFiles: ['./tests/bun-shim.ts'],
         testTimeout: 15000,
         hookTimeout: 15000,
     },
