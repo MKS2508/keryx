@@ -31,6 +31,13 @@ export interface IGeminiPromptConfig {
         includeChangelog?: boolean;
         includeTrailers?: boolean;
     };
+    /**
+     * Optional typed decisions from a decision provider (e.g. jev).
+     * When present, the prompt prepends a `## DECISIONES DEL CLASSIFIER`
+     * block with these as structured JSON so the text provider can
+     * use them as guidance (not as overrides).
+     */
+    decisions?: import('./decision.types.js').ICommitDecisions;
 }
 
 /**

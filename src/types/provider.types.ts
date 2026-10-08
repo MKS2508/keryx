@@ -1,40 +1,50 @@
 /**
  * Provider type definitions for AI commit generation backends.
+ *
+ * v3.1 split: text providers (`IAIProvider`) and decision providers
+ * (`IDecisionProvider`) are two distinct interfaces. A text provider
+ * returns prose (used for the commit body). A decision provider returns
+ * typed answers — no prose — and is used to classify the diff before
+ * the text provider writes. The factory in `src/providers/index.ts`
+ * is the only registration point for both kinds.
+ *
  * @module types/provider
  */
 
 /**
- * Supported AI provider identifiers.
+ * Text provider identifiers. The registry lives in
+ * `src/providers/index.ts` `PROVIDER_MAP`.
  *
- * ## Adding future providers (agy, Jev)
- *
- * The factory (`src/providers/index.ts` `PROVIDER_MAP`) is the only
- * registration point — one entry per name mapping to a
- * `(model?) => IAIProvider` factory. Two providers are planned for v3.x:
- *
- * - **`agy`** — the Gemini CLI-based agent runtime. CLI-provider shape:
- *   copy the `GeminiCliProvider` pattern (`src/providers/gemini-cli.ts`) —
- *   `isAvailable()` probes the binary, `generate()` pipes the prompt to
- *   the CLI over stdin via `Bun.spawnSync` and returns stdout.
- * - **`jev`** — typesafe.ai. SDK-provider shape: copy the
- *   `GeminiSdkProvider` pattern (`src/providers/gemini-sdk.ts`) —
- *   `isAvailable()` checks the env key, `generate()` awaits the SDK call.
- *
- * In both cases: add the id to this union, the class to `src/providers/`,
- * the entry in `PROVIDER_MAP` + `AUTO_DETECT_ORDER` (if it should
- * auto-detect), and a `getProviderRequirement` string so the failure
- * message tells the user what to install.
+ * `agy` (v3.1) is the new default — a heavy CLI-backed LLM. The
+ * gemini/groq/openrouter entries are kept for backward compatibility
+ * and as fallbacks when agy is not installed.
  */
-export type ProviderName = 'gemini-cli' | 'gemini-sdk' | 'groq' | 'openrouter';
+export type ProviderName =
+    | 'gemini-cli'
+    | 'gemini-sdk'
+    | 'groq'
+    | 'openrouter'
+    | 'agy';
 
 /**
- * Common interface for all AI providers.
+ * Decision provider identifiers. Today only `jev` (TypeSafe's System
+ * One Model). Adding a second decision provider (e.g. an LLM-as-judge
+ * fallback) means extending this union + `DECISION_PROVIDER_MAP`.
+ */
+export type DecisionProviderName = 'jev';
+
+/**
+ * Common interface for text-generating AI providers.
+ *
+ * Used by `CommitGenerator` to write the commit body and by
+ * `runReleaseNotes` to write trailer proposals. The body is markdown
+ * that the downstream `GeminiResponseParser` understands.
  *
  * @example
  * ```typescript
  * const provider: IAIProvider = createProvider('groq');
  * if (provider.isAvailable()) {
- *   const response = await provider.generate(prompt);
+ *     const response = await provider.generate(prompt);
  * }
  * ```
  */
@@ -46,13 +56,67 @@ export interface IAIProvider {
     /** Model being used */
     model: string;
     /**
-     * Generate a response from the AI model.
+     * Generate a text response from the AI model.
      * @param prompt - The prompt to send
      * @returns The AI-generated text response
      */
     generate(prompt: string): Promise<string>;
     /**
      * Check if this provider is available (API key set, binary found, etc.).
+     * @returns Whether the provider can be used
+     */
+    isAvailable(): boolean;
+}
+
+/**
+ * Common interface for decision / classification providers.
+ *
+ * A decision provider does NOT write prose. It receives a state and a
+ * map of typed questions and returns typed answers with calibrated
+ * probabilities. The hybrid pipeline injects those answers into the
+ * text provider's prompt as structured context.
+ *
+ * Today only `JevProvider` (System One Model from TypeSafe AI) implements
+ * this. The question shape matches the `@typesafe-ai/sdk` SDK's
+ * `systemOne` input: `noul` (yes/no with probability), `choice`
+ * (one of N options with probabilities), `score` (weighted over a
+ * rubric).
+ *
+ * @example
+ * ```typescript
+ * const jev: IDecisionProvider = createDecisionProvider('jev');
+ * if (jev.isAvailable()) {
+ *     const out = await jev.decide(diff, {
+ *         commit_type: { type: 'choice', ... },
+ *         breaking: { type: 'noul', ... },
+ *     });
+ * }
+ * ```
+ */
+export interface IDecisionProvider {
+    /** Human-readable provider name */
+    name: string;
+    /** Provider identifier */
+    id: DecisionProviderName;
+    /** Model being used */
+    model: string;
+    /**
+     * Submit a state + typed questions and get back typed answers.
+     * @param state - Any JSON-serializable payload (string, object, or
+     *                array). Typed as `unknown` because keryx passes
+     *                structured analysis objects to jev, and the SDK
+     *                accepts whatever serializes.
+     * @param questions - Map of question key -> SDK-shaped question
+     *                    (e.g. `{ type: 'noul', instructions, criteria }`)
+     * @returns Provider-specific typed answer; callers narrow the shape
+     *          via the generic parameter to match the questions they sent
+     */
+    decide<T = unknown>(
+        state: unknown,
+        questions: Record<string, unknown>,
+    ): Promise<T>;
+    /**
+     * Check if this provider is available (API key set, etc.).
      * @returns Whether the provider can be used
      */
     isAvailable(): boolean;
