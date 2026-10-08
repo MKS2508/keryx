@@ -18,7 +18,7 @@ import { ok, err, isErr, tryCatchAsync, type Result, type ResultError } from '@m
 import { createCommitPrompt, GeminiResponseParser, type GeminiPromptConfig } from './prompt-templates';
 import { formatTrailersBlock, missingReleaseNoteWarnings } from './trailers.js';
 import { runReleaseNotesCli } from './release-notes.js';
-import { createProvider, listProviders } from './providers/index.js';
+import { createProvider, createDecisionProvider, listProviders, listDecisionProviders } from './providers/index.js';
 import { loadProjectConfig } from './project-config';
 import { detectTerminalCapabilities, formatProviderBadge, shouldUseFancyOutput, type ITerminalCapabilities } from './utils/index.js';
 import {
@@ -35,16 +35,20 @@ import {
     ExitCode,
     type JsonEnvelope,
 } from './reporter.js';
+import { commitDecisionsQuestions, mapJevToCommitDecisions, truncateForDecisionProvider } from './decisions.js';
 import type {
     IAIProvider,
+    IDecisionProvider,
     IProjectConfig,
     IFileChange,
     IGitStats,
     ICommitAnalysis,
+    ICommitDecisions,
     ICommitProposal,
     ICommitGeneratorOptions,
     ICommitResult,
     CommitErrorCode,
+    DecisionProviderName,
 } from './types/index.js';
 
 /**
@@ -121,6 +125,7 @@ function parseCliArgs(argv: string[]): ICommitGeneratorOptions {
     return {
         provider: (get('--provider') || process.env.COMMIT_WIZARD_PROVIDER) as any,
         model: get('--model'),
+        decisionProvider: (get('--decision-provider') || process.env.COMMIT_WIZARD_DECISION_PROVIDER) as any,
         // v2.0: autoApprove defaults to FALSE. --auto-approve still works but
         // is now paired with --confirm-push for actual execution.
         autoApprove: args.includes('--auto-approve') || args.includes('--yes') || args.includes('-y'),
@@ -171,6 +176,7 @@ export class CommitGenerator {
     private tempDir: string;
     private options: ICommitGeneratorOptions;
     private provider: IAIProvider;
+    private decisionProvider: IDecisionProvider | null;
     private projectConfig: IProjectConfig;
     private caps: ITerminalCapabilities;
 
@@ -216,10 +222,22 @@ export class CommitGenerator {
         const resolvedModel = options.model || this.projectConfig.model;
         this.provider = options.providerInstance ?? createProvider(resolvedProvider, resolvedModel);
 
+        // v3.1 hybrid pipeline: opt-in decision provider (jev).
+        // decisionProviderInstance skips the factory; createDecisionProvider
+        // returns null when no decision provider is available, in which
+        // case analyzeWithAI runs text-only.
+        const resolvedDecisionProvider = options.decisionProvider
+            || this.projectConfig.decisionProvider;
+        this.decisionProvider = options.decisionProviderInstance
+            ?? createDecisionProvider(resolvedDecisionProvider);
+
         // Subtle provider badge instead of loud message
         if (!options.quiet && !options.silent) {
             const providerBadge = formatProviderBadge(this.provider.name, this.caps);
-            log.info(`${providerBadge} ${this.provider.model}`);
+            const decisionSuffix = this.decisionProvider
+                ? ` · classified by ${this.decisionProvider.name}`
+                : '';
+            log.info(`${providerBadge} ${this.provider.model}${decisionSuffix}`);
         }
         this.ensureTempDir();
     }
@@ -426,7 +444,7 @@ export class CommitGenerator {
         });
     }
 
-    private createPrompt(analysis: ICommitAnalysis, exhaustive: boolean, extraContext: string): string {
+    private createPrompt(analysis: ICommitAnalysis, decisions: ICommitDecisions | null, exhaustive: boolean, extraContext: string): string {
         const config: GeminiPromptConfig = {
             projectContext: {
                 name: this.projectConfig.name,
@@ -452,6 +470,7 @@ export class CommitGenerator {
                 })),
                 patterns: analysis.commit_patterns,
             },
+            ...(decisions && { decisions }),
         };
         return createCommitPrompt(config);
     }
@@ -488,7 +507,60 @@ export class CommitGenerator {
     }
 
     /**
-     * Invoke the AI provider with the analysis context.
+     * Invoke the decision provider to classify the diff before the text
+     * provider writes the body. Saves the request and the response to
+     * `.temp/decisions-{input,output}.json` for audit. Returns null
+     * when no decision provider is configured.
+     *
+     * @param analysis - Commit analysis data
+     * @returns Result with the typed decisions, or null when the decision
+     *          provider is not configured
+     */
+    private async classifyWithDecisionProvider(
+        analysis: ICommitAnalysis,
+    ): Promise<Result<ICommitDecisions | null, ResultError<'PROVIDER_ERROR'>>> {
+        if (!this.decisionProvider) {
+            return ok(null);
+        }
+
+        const questions = commitDecisionsQuestions(this.projectConfig);
+        const inputPath = join(this.tempDir, 'decisions-input.json');
+        const outputPath = join(this.tempDir, 'decisions-output.json');
+
+        // jev's per-request token budget cannot fit multi-thousand-line
+        // diffs (real failure on styx cb5efc6: 1416 lines). Truncate
+        // the per-file diff_preview and, if still over budget, drop
+        // the diff from the largest files first. The full diff is
+        // still passed to the text provider (agy) for the body.
+        const truncatedState = truncateForDecisionProvider(analysis);
+
+        // Persist the exact request we send to jev so the run is
+        // reproducible from `.temp/` alone.
+        writeFileSync(
+            inputPath,
+            JSON.stringify({ state: truncatedState, questions }, null, 2),
+        );
+
+        const result = await tryCatchAsync(async () => {
+            const raw = await this.decisionProvider!.decide<unknown>(truncatedState, questions);
+            writeFileSync(outputPath, JSON.stringify(raw, null, 2));
+            return mapJevToCommitDecisions(raw);
+        }, 'PROVIDER_ERROR');
+
+        if (isErr(result)) {
+            log.error(`Error with ${this.decisionProvider.name}: ${result.error.message}`);
+            log.info(`Decisions input saved: ${inputPath}`);
+        }
+
+        return result;
+    }
+
+    /**
+     * Invoke the AI provider with the analysis context. v3.1 hybrid:
+     * if a decision provider is configured, classify the diff first
+     * and inject the typed decisions into the prompt. The text
+     * provider still writes the full markdown; the parser is unchanged.
+     *
      * @param analysis - Commit analysis data
      * @param exhaustive - Whether to use exhaustive analysis
      * @param extraContext - Additional context string
@@ -499,13 +571,23 @@ export class CommitGenerator {
         exhaustive: boolean,
         extraContext: string,
     ): Promise<Result<string, ResultError<'PROVIDER_ERROR'>>> {
-        const prompt = this.createPrompt(analysis, exhaustive, extraContext);
+        // Stage 1: classify (optional)
+        let decisions: ICommitDecisions | null = null;
+        if (this.decisionProvider) {
+            const classifyResult = await this.classifyWithDecisionProvider(analysis);
+            if (isErr(classifyResult)) return classifyResult as any;
+            decisions = classifyResult.value;
+        }
+
+        // Stage 2: build prompt enriched with decisions
+        const prompt = this.createPrompt(analysis, decisions, exhaustive, extraContext);
 
         const contextPath = join(this.tempDir, 'analysis-context.json');
         writeFileSync(contextPath, JSON.stringify(analysis, null, 2));
         const promptPath = join(this.tempDir, 'prompt.txt');
         writeFileSync(promptPath, prompt);
 
+        // Stage 3: text provider writes the body
         const result = await tryCatchAsync(async () => {
             const response = await this.provider.generate(prompt);
             const responsePath = join(this.tempDir, 'response.md');
@@ -1065,8 +1147,9 @@ if (import.meta.main) {
         log.info('       keryx release-notes [options]');
         log.blank();
         log.info('Options:');
-        log.info('  --provider <name>            Provider: gemini-cli|gemini-sdk|groq|openrouter');
-        log.info('  --model <model-id>           Model override');
+        log.info('  --provider <name>            Text provider: agy|gemini-cli|gemini-sdk|groq|openrouter');
+        log.info('  --model <model-id>           Text model override');
+        log.info('  --decision-provider <name>   Decision provider: jev (opt-in; reads TYPESAFE_API_KEY)');
         log.info('  --auto-approve               Execute commits automatically');
         log.info('  --no-push                    Skip git push');
         log.info('  --context <description>      Describe your changes');
@@ -1112,9 +1195,10 @@ if (import.meta.main) {
     if (args.includes('--list-providers')) {
         const caps = detectTerminalCapabilities();
         const providers = listProviders();
+        const decisionProviders = listDecisionProviders();
 
         if (shouldUseFancyOutput(caps)) {
-            log.header('Available Providers');
+            log.header('Text providers (body writer)');
             log.blank();
             log.cliTable(
                 providers.map(p => ({
@@ -1124,9 +1208,26 @@ if (import.meta.main) {
                     requirement: p.available ? '-' : p.requirement,
                 })),
             );
+            log.blank();
+            log.header('Decision providers (classifier)');
+            log.blank();
+            log.cliTable(
+                decisionProviders.map(p => ({
+                    status: p.available ? 'ready' : 'missing',
+                    provider: p.name,
+                    id: p.id,
+                    requirement: p.available ? '-' : p.requirement,
+                })),
+            );
         } else {
+            log.info('Text providers:');
             for (const p of providers) {
-                log.info(`${p.available ? '✓' : '✗'} ${p.id.padEnd(12)} ${p.name}`);
+                log.info(`  ${p.available ? '✓' : '✗'} ${p.id.padEnd(12)} ${p.name}`);
+            }
+            log.blank();
+            log.info('Decision providers:');
+            for (const p of decisionProviders) {
+                log.info(`  ${p.available ? '✓' : '✗'} ${p.id.padEnd(12)} ${p.name}`);
             }
         }
         log.blank();
