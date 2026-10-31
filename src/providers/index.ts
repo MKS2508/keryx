@@ -1,36 +1,58 @@
 /**
- * Provider barrel export — factory, listing, and all provider classes.
+ * Provider barrel — factories, listings, and all provider classes.
+ *
+ * v3.1 split: text providers (agy + 4 legacy) and decision providers
+ * (jev) are two separate registries with two separate factories.
+ * See `src/types/provider.types.ts` for the interface distinction.
+ *
  * @module providers
  */
 
-import type { IAIProvider, ProviderName } from '../types/index.js';
+import type {
+    DecisionProviderName,
+    IAIProvider,
+    IDecisionProvider,
+    ProviderName,
+} from '../types/index.js';
+import { AgyProvider } from './agy.js';
 import { GeminiCliProvider } from './gemini-cli.js';
 import { GeminiSdkProvider } from './gemini-sdk.js';
 import { GroqProvider } from './groq.js';
+import { JevProvider } from './jev.js';
 import { OpenRouterProvider } from './openrouter.js';
 
+export { AgyProvider } from './agy.js';
 export { GeminiCliProvider } from './gemini-cli.js';
 export { GeminiSdkProvider } from './gemini-sdk.js';
 export { GroqProvider } from './groq.js';
+export { JevProvider } from './jev.js';
 export { OpenRouterProvider } from './openrouter.js';
 
-/** Provider factory map */
+/** Text provider factory map. One entry per name. */
 const PROVIDER_MAP: Record<ProviderName, (model?: string) => IAIProvider> = {
+    'agy': () => new AgyProvider(),
     'gemini-cli': () => new GeminiCliProvider(),
     'gemini-sdk': (model) => new GeminiSdkProvider(model),
     'groq': (model) => new GroqProvider(model),
     'openrouter': (model) => new OpenRouterProvider(model),
 };
 
+/** Decision provider factory map. One entry per name. */
+const DECISION_PROVIDER_MAP: Record<
+    DecisionProviderName,
+    (model?: string) => IDecisionProvider
+> = {
+    'jev': (model) => new JevProvider(model),
+};
+
 /**
- * Auto-detection priority when no provider is specified.
- *
- * 1. GEMINI_API_KEY -> Gemini SDK (default, most versatile)
- * 2. GROQ_API_KEY -> Groq (fastest inference)
- * 3. OPENROUTER_API_KEY -> OpenRouter (most models)
- * 4. `gemini` binary -> Gemini CLI (fallback, no API key needed)
+ * Auto-detection priority for text providers when no `--provider` is
+ * given. `agy` is first because it is the v3.1 default. The gemini /
+ * groq / openrouter entries are kept for backward compatibility and
+ * as fallbacks when agy is not installed.
  */
 const AUTO_DETECT_ORDER: ProviderName[] = [
+    'agy',
     'gemini-sdk',
     'groq',
     'openrouter',
@@ -38,12 +60,21 @@ const AUTO_DETECT_ORDER: ProviderName[] = [
 ];
 
 /**
- * Get a human-readable requirement string for a provider.
+ * Auto-detection priority for decision providers when no
+ * `--decision-provider` is given. Today there is only one entry, but
+ * the loop stays so adding a second decision provider is mechanical.
+ */
+const DECISION_AUTO_DETECT_ORDER: DecisionProviderName[] = ['jev'];
+
+/**
+ * Human-readable requirement for a missing text provider.
  * @param name - Provider identifier
  * @returns Requirement description
  */
 function getProviderRequirement(name: ProviderName): string {
     switch (name) {
+        case 'agy':
+            return 'Install the agy CLI and ensure it is in your PATH.';
         case 'gemini-cli':
             return 'Install the Gemini CLI: https://ai.google.dev/gemini-api/docs/gemini-cli';
         case 'gemini-sdk':
@@ -56,21 +87,25 @@ function getProviderRequirement(name: ProviderName): string {
 }
 
 /**
- * Create a provider instance by name, or auto-detect the best available one.
+ * Human-readable requirement for a missing decision provider.
+ * @param name - Provider identifier
+ * @returns Requirement description
+ */
+function getDecisionProviderRequirement(name: DecisionProviderName): string {
+    switch (name) {
+        case 'jev':
+            return 'Set JEV_API_KEY (or TYPESAFE_API_KEY) — your TypeSafe AI API key.';
+    }
+}
+
+/**
+ * Create a text provider instance by name, or auto-detect the best
+ * available one. Mirrors the v2.0 behavior.
  *
  * @param name - Provider name, or undefined for auto-detection
  * @param model - Optional model override
  * @returns Configured IAIProvider instance
  * @throws Error if no provider is available or the requested one is unavailable
- *
- * @example
- * ```typescript
- * // Auto-detect best available provider
- * const provider = createProvider();
- *
- * // Explicit provider with custom model
- * const groq = createProvider('groq', 'llama-3.3-70b-versatile');
- * ```
  */
 export function createProvider(name?: string, model?: string): IAIProvider {
     if (name) {
@@ -103,25 +138,62 @@ export function createProvider(name?: string, model?: string): IAIProvider {
 
     throw new Error(
         `No AI provider available. Set one of these environment variables:\n` +
-        `  - GEMINI_API_KEY  -> Gemini SDK (recommended)\n` +
-        `  - GROQ_API_KEY    -> Groq (fastest)\n` +
-        `  - OPENROUTER_API_KEY -> OpenRouter (300+ models)\n` +
-        `  Or install the Gemini CLI: https://ai.google.dev/gemini-api/docs/gemini-cli`,
+        `  - JEV_API_KEY (or TYPESAFE_API_KEY) -> jev decision provider (v3.1 default)\n` +
+        `  - GEMINI_API_KEY    -> Gemini SDK\n` +
+        `  - GROQ_API_KEY      -> Groq\n` +
+        `  - OPENROUTER_API_KEY -> OpenRouter\n` +
+        `  Or install the agy or gemini CLI and ensure it is in your PATH.`,
     );
 }
 
 /**
- * List all providers with their availability status.
+ * Create a decision provider instance by name, or auto-detect the
+ * best available one. Returns `null` when no decision provider is
+ * available (the hybrid pipeline is opt-in; keryx keeps working in
+ * text-only mode when jev is not configured).
  *
+ * @param name - Provider name, or undefined for auto-detection
+ * @param model - Optional model override
+ * @returns Configured IDecisionProvider instance, or null if unavailable
+ */
+export function createDecisionProvider(
+    name?: string,
+    model?: string,
+): IDecisionProvider | null {
+    if (name) {
+        const providerName = name as DecisionProviderName;
+        const factory = DECISION_PROVIDER_MAP[providerName];
+        if (!factory) {
+            const available = Object.keys(DECISION_PROVIDER_MAP).join(', ');
+            throw new Error(
+                `Unknown decision provider "${name}". Available decision providers: ${available}`,
+            );
+        }
+
+        const provider = factory(model);
+        if (!provider.isAvailable()) {
+            throw new Error(
+                `Decision provider "${name}" is not available. ${getDecisionProviderRequirement(providerName)}`,
+            );
+        }
+
+        return provider;
+    }
+
+    for (const providerName of DECISION_AUTO_DETECT_ORDER) {
+        const factory = DECISION_PROVIDER_MAP[providerName];
+        const provider = factory(model);
+        if (provider.isAvailable()) {
+            return provider;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * List all text providers with their availability status.
  * @returns Array of provider info objects
- *
- * @example
- * ```typescript
- * const providers = listProviders();
- * for (const p of providers) {
- *   console.log(`${p.name}: ${p.available ? 'ready' : 'missing'}`);
- * }
- * ```
  */
 export function listProviders(): Array<{
     name: string;
@@ -135,7 +207,28 @@ export function listProviders(): Array<{
             name: provider.name,
             id,
             available: provider.isAvailable(),
-            requirement: getProviderRequirement(id),
+            requirement: provider.isAvailable() ? '-' : getProviderRequirement(id),
+        };
+    });
+}
+
+/**
+ * List all decision providers with their availability status.
+ * @returns Array of decision provider info objects
+ */
+export function listDecisionProviders(): Array<{
+    name: string;
+    id: DecisionProviderName;
+    available: boolean;
+    requirement: string;
+}> {
+    return (Object.keys(DECISION_PROVIDER_MAP) as DecisionProviderName[]).map((id) => {
+        const provider = DECISION_PROVIDER_MAP[id]();
+        return {
+            name: provider.name,
+            id,
+            available: provider.isAvailable(),
+            requirement: provider.isAvailable() ? '-' : getDecisionProviderRequirement(id),
         };
     });
 }

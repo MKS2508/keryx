@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * Setup wizard for gemini-commit-wizard.
+ * Setup wizard for keryx.
  *
  * Interactive command that generates a `.commit-wizard.json` for the
  * current project. Auto-detects tech stack and existing config, then
@@ -21,8 +21,8 @@ import { join, basename } from 'path';
 import logger from '@mks2508/better-logger';
 // Alias so the file's existing `log.xxx(...)` call sites stay unchanged.
 const log = logger;
-import { tryCatchAsync, type Result } from '@mks2508/no-throw';
-import { loadProjectConfig, detectTechStack, detectPlatform } from './project-config.js';
+import { tryCatchAsync, type Result, type ResultError } from '@mks2508/no-throw';
+import { loadProjectConfig } from './project-config.js';
 import type { IProjectConfig, IProjectComponent } from './types/index.js';
 
 
@@ -51,6 +51,7 @@ export interface ISetupWizardInput {
         bodyLanguage?: string;
         includeTechnical?: boolean;
         includeChangelog?: boolean;
+        includeTrailers?: boolean;
     };
     provider?: 'gemini-sdk' | 'groq' | 'openrouter' | 'gemini-cli';
     model?: string;
@@ -200,6 +201,21 @@ export function detectProviderPreference(): { provider: string; model: string } 
     return null;
 }
 
+/**
+ * v3.1: detect a preferred DECISION provider from environment.
+ * Today the only decision provider is jev (TypeSafe). The check is
+ * independent of `detectProviderPreference` so a user can have only
+ * the decision provider set (rare) or only the text provider set
+ * (common) without breaking the wizard. Honors both `JEV_API_KEY`
+ * (keryx convention) and `TYPESAFE_API_KEY` (SDK default).
+ */
+export function detectDecisionProviderPreference(): { decisionProvider: string } | null {
+    if (process.env.JEV_API_KEY || process.env.TYPESAFE_API_KEY) {
+        return { decisionProvider: 'jev' };
+    }
+    return null;
+}
+
 // ─── Wizard core ──────────────────────────────────────────────
 
 /**
@@ -303,6 +319,12 @@ function buildQuestions(
             default: detected.commitFormat?.includeChangelog ?? true,
         },
         {
+            key: 'includeTrailers',
+            type: 'confirm',
+            message: 'Propose release-note trailers (Release-Note/Breaking/Upgrade-Step/Security) when justified?',
+            default: detected.commitFormat?.includeTrailers ?? true,
+        },
+        {
             key: 'noPush',
             type: 'confirm',
             message: 'Default to --no-push (require --confirm-push to push)?',
@@ -344,7 +366,7 @@ export async function runSetupWizard(options: {
     dryRun?: boolean;
     input?: ISetupWizardInput;
     promptFn?: ISetupPromptFn;
-} = {}): Promise<Result<SetupResult, string>> {
+ } = {}): Promise<Result<SetupResult, ResultError<'SETUP_ERROR'>>> {
     return tryCatchAsync(async () => {
         const projectRoot = options.projectRoot ?? process.cwd();
         const targetPath = join(projectRoot, '.commit-wizard.json');
@@ -374,6 +396,11 @@ export async function runSetupWizard(options: {
             detected.model = providerPref.model;
         }
 
+        const decisionProviderPref = detectDecisionProviderPreference();
+        if (decisionProviderPref) {
+            detected.decisionProvider = decisionProviderPref.decisionProvider as IProjectConfig['decisionProvider'];
+        }
+
         const override = options.input ?? {};
         const merged = applyInputOverrides(detected, override);
 
@@ -394,6 +421,7 @@ export async function runSetupWizard(options: {
                 titleLanguage: merged.commitFormat?.titleLanguage ?? 'english',
                 bodyLanguage: merged.commitFormat?.bodyLanguage ?? 'spanish',
                 includeChangelog: merged.commitFormat?.includeChangelog ?? true,
+                includeTrailers: merged.commitFormat?.includeTrailers ?? true,
                 noPush: override.noPush ?? true,
             };
         }
@@ -412,6 +440,7 @@ export async function runSetupWizard(options: {
                 bodyLanguage: String(answers.bodyLanguage ?? 'spanish'),
                 includeTechnical: merged.commitFormat?.includeTechnical ?? true,
                 includeChangelog: Boolean(answers.includeChangelog ?? true),
+                includeTrailers: Boolean(answers.includeTrailers ?? merged.commitFormat?.includeTrailers ?? true),
             },
             provider: (merged.provider ?? 'groq') as IProjectConfig['provider'],
             model: merged.model,
@@ -459,14 +488,12 @@ async function defaultPrompt(questions: ISetupQuestion[]): Promise<Record<string
                 answers[q.key] = await select({
                     message: q.message,
                     choices: q.choices ?? [],
-                    default: q.default as string | undefined,
                 });
                 break;
             case 'checkbox':
                 answers[q.key] = await checkbox({
                     message: q.message,
                     choices: q.choices ?? [],
-                    default: q.default as string[] | undefined,
                 });
                 break;
             case 'confirm':

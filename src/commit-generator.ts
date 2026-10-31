@@ -16,7 +16,9 @@ import logger from '@mks2508/better-logger';
 const log = logger;
 import { ok, err, isErr, tryCatchAsync, type Result, type ResultError } from '@mks2508/no-throw';
 import { createCommitPrompt, GeminiResponseParser, type GeminiPromptConfig } from './prompt-templates';
-import { createProvider, listProviders } from './providers/index.js';
+import { formatTrailersBlock, missingReleaseNoteWarnings } from './trailers.js';
+import { runReleaseNotesCli } from './release-notes.js';
+import { createProvider, createDecisionProvider, listProviders, listDecisionProviders } from './providers/index.js';
 import { loadProjectConfig } from './project-config';
 import { detectTerminalCapabilities, formatProviderBadge, shouldUseFancyOutput, type ITerminalCapabilities } from './utils/index.js';
 import {
@@ -33,23 +35,32 @@ import {
     ExitCode,
     type JsonEnvelope,
 } from './reporter.js';
+import { commitDecisionsQuestions, mapJevToCommitDecisions, truncateForDecisionProvider } from './decisions.js';
 import type {
     IAIProvider,
+    IDecisionProvider,
     IProjectConfig,
     IFileChange,
     IGitStats,
     ICommitAnalysis,
+    ICommitDecisions,
     ICommitProposal,
     ICommitGeneratorOptions,
     ICommitResult,
     CommitErrorCode,
+    DecisionProviderName,
 } from './types/index.js';
 
 /**
- * Wizard version. Bumped on every release.
- * Keep in sync with `package.json` so `--version` reports the truth.
+ * Keryx version, read from `package.json` at startup.
+ *
+ * Previously a hardcoded constant that drifted out of sync with
+ * `package.json` on every `version-manager` bump (2.1.0 vs 2.1.1);
+ * deriving it removes that drift class entirely.
  */
-export const WIZARD_VERSION = '2.1.0';
+export const WIZARD_VERSION: string = (
+    JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8')) as { version: string }
+).version;
 
 
 /**
@@ -114,6 +125,7 @@ function parseCliArgs(argv: string[]): ICommitGeneratorOptions {
     return {
         provider: (get('--provider') || process.env.COMMIT_WIZARD_PROVIDER) as any,
         model: get('--model'),
+        decisionProvider: (get('--decision-provider') || process.env.COMMIT_WIZARD_DECISION_PROVIDER) as any,
         // v2.0: autoApprove defaults to FALSE. --auto-approve still works but
         // is now paired with --confirm-push for actual execution.
         autoApprove: args.includes('--auto-approve') || args.includes('--yes') || args.includes('-y'),
@@ -164,6 +176,7 @@ export class CommitGenerator {
     private tempDir: string;
     private options: ICommitGeneratorOptions;
     private provider: IAIProvider;
+    private decisionProvider: IDecisionProvider | null;
     private projectConfig: IProjectConfig;
     private caps: ITerminalCapabilities;
 
@@ -183,7 +196,8 @@ export class CommitGenerator {
         if (options.silent || options.json) {
             log.setVerbosity('silent');
         } else if (options.quiet) {
-            log.setVerbosity('quiet');
+            // Verbosity has no 'quiet' — errors-only is the closest level.
+            log.setVerbosity('error');
         } else if (options.verbose) {
             log.setVerbosity('debug');
         }
@@ -201,14 +215,29 @@ export class CommitGenerator {
 
         this.projectConfig = loadProjectConfig(this.projectRoot);
 
+        // providerInstance is the hermetic seam: a pre-built provider
+        // (test double or SDK consumer's own) skips the factory and the
+        // availability check entirely.
         const resolvedProvider = options.provider || this.projectConfig.provider;
         const resolvedModel = options.model || this.projectConfig.model;
-        this.provider = createProvider(resolvedProvider, resolvedModel);
+        this.provider = options.providerInstance ?? createProvider(resolvedProvider, resolvedModel);
+
+        // v3.1 hybrid pipeline: opt-in decision provider (jev).
+        // decisionProviderInstance skips the factory; createDecisionProvider
+        // returns null when no decision provider is available, in which
+        // case analyzeWithAI runs text-only.
+        const resolvedDecisionProvider = options.decisionProvider
+            || this.projectConfig.decisionProvider;
+        this.decisionProvider = options.decisionProviderInstance
+            ?? createDecisionProvider(resolvedDecisionProvider);
 
         // Subtle provider badge instead of loud message
         if (!options.quiet && !options.silent) {
             const providerBadge = formatProviderBadge(this.provider.name, this.caps);
-            log.info(`${providerBadge} ${this.provider.model}`);
+            const decisionSuffix = this.decisionProvider
+                ? ` · classified by ${this.decisionProvider.name}`
+                : '';
+            log.info(`${providerBadge} ${this.provider.model}${decisionSuffix}`);
         }
         this.ensureTempDir();
     }
@@ -415,7 +444,7 @@ export class CommitGenerator {
         });
     }
 
-    private createPrompt(analysis: ICommitAnalysis, exhaustive: boolean, extraContext: string): string {
+    private createPrompt(analysis: ICommitAnalysis, decisions: ICommitDecisions | null, exhaustive: boolean, extraContext: string): string {
         const config: GeminiPromptConfig = {
             projectContext: {
                 name: this.projectConfig.name,
@@ -441,6 +470,7 @@ export class CommitGenerator {
                 })),
                 patterns: analysis.commit_patterns,
             },
+            ...(decisions && { decisions }),
         };
         return createCommitPrompt(config);
     }
@@ -477,7 +507,60 @@ export class CommitGenerator {
     }
 
     /**
-     * Invoke the AI provider with the analysis context.
+     * Invoke the decision provider to classify the diff before the text
+     * provider writes the body. Saves the request and the response to
+     * `.temp/decisions-{input,output}.json` for audit. Returns null
+     * when no decision provider is configured.
+     *
+     * @param analysis - Commit analysis data
+     * @returns Result with the typed decisions, or null when the decision
+     *          provider is not configured
+     */
+    private async classifyWithDecisionProvider(
+        analysis: ICommitAnalysis,
+    ): Promise<Result<ICommitDecisions | null, ResultError<'PROVIDER_ERROR'>>> {
+        if (!this.decisionProvider) {
+            return ok(null);
+        }
+
+        const questions = commitDecisionsQuestions(this.projectConfig);
+        const inputPath = join(this.tempDir, 'decisions-input.json');
+        const outputPath = join(this.tempDir, 'decisions-output.json');
+
+        // jev's per-request token budget cannot fit multi-thousand-line
+        // diffs (real failure on styx cb5efc6: 1416 lines). Truncate
+        // the per-file diff_preview and, if still over budget, drop
+        // the diff from the largest files first. The full diff is
+        // still passed to the text provider (agy) for the body.
+        const truncatedState = truncateForDecisionProvider(analysis);
+
+        // Persist the exact request we send to jev so the run is
+        // reproducible from `.temp/` alone.
+        writeFileSync(
+            inputPath,
+            JSON.stringify({ state: truncatedState, questions }, null, 2),
+        );
+
+        const result = await tryCatchAsync(async () => {
+            const raw = await this.decisionProvider!.decide<unknown>(truncatedState, questions);
+            writeFileSync(outputPath, JSON.stringify(raw, null, 2));
+            return mapJevToCommitDecisions(raw);
+        }, 'PROVIDER_ERROR');
+
+        if (isErr(result)) {
+            log.error(`Error with ${this.decisionProvider.name}: ${result.error.message}`);
+            log.info(`Decisions input saved: ${inputPath}`);
+        }
+
+        return result;
+    }
+
+    /**
+     * Invoke the AI provider with the analysis context. v3.1 hybrid:
+     * if a decision provider is configured, classify the diff first
+     * and inject the typed decisions into the prompt. The text
+     * provider still writes the full markdown; the parser is unchanged.
+     *
      * @param analysis - Commit analysis data
      * @param exhaustive - Whether to use exhaustive analysis
      * @param extraContext - Additional context string
@@ -488,13 +571,23 @@ export class CommitGenerator {
         exhaustive: boolean,
         extraContext: string,
     ): Promise<Result<string, ResultError<'PROVIDER_ERROR'>>> {
-        const prompt = this.createPrompt(analysis, exhaustive, extraContext);
+        // Stage 1: classify (optional)
+        let decisions: ICommitDecisions | null = null;
+        if (this.decisionProvider) {
+            const classifyResult = await this.classifyWithDecisionProvider(analysis);
+            if (isErr(classifyResult)) return classifyResult as any;
+            decisions = classifyResult.value;
+        }
+
+        // Stage 2: build prompt enriched with decisions
+        const prompt = this.createPrompt(analysis, decisions, exhaustive, extraContext);
 
         const contextPath = join(this.tempDir, 'analysis-context.json');
         writeFileSync(contextPath, JSON.stringify(analysis, null, 2));
         const promptPath = join(this.tempDir, 'prompt.txt');
         writeFileSync(promptPath, prompt);
 
+        // Stage 3: text provider writes the body
         const result = await tryCatchAsync(async () => {
             const response = await this.provider.generate(prompt);
             const responsePath = join(this.tempDir, 'response.md');
@@ -532,6 +625,7 @@ export class CommitGenerator {
             description: p.description,
             technical: p.technical,
             changelog: p.changelog,
+            trailers: p.trailers ?? [],
             files: p.files ?? [],
         }));
     }
@@ -595,7 +689,7 @@ export class CommitGenerator {
         if (isErr(validated)) return validated;
 
         return tryCatchAsync(async () => {
-            const targetFiles = proposal.files;
+            const targetFiles = validated.value;
 
             for (const file of targetFiles) {
                 const addResult = await this.gitCommand(['add', '--', file]);
@@ -612,10 +706,15 @@ export class CommitGenerator {
 
             // F22: build commit message and write to temp file to avoid
             // shell escaping bugs. Use `git commit -F <file>`.
+            // Trailers go last (git trailer convention) so the changelog
+            // pipeline can pick them up from the commit body.
             let commitMessage = proposal.title;
             if (proposal.description) commitMessage += `\n\n${proposal.description}`;
             if (proposal.technical) commitMessage += `\n\n<technical>\n${proposal.technical}\n</technical>`;
             if (proposal.changelog) commitMessage += `\n\n<changelog>\n${proposal.changelog}\n</changelog>`;
+            if (proposal.trailers && proposal.trailers.length > 0) {
+                commitMessage += `\n\n${formatTrailersBlock(proposal.trailers)}`;
+            }
 
             const messagePath = join(this.projectRoot, '.temp', `commit-msg-${Date.now()}.txt`);
             writeFileSync(messagePath, commitMessage, 'utf-8');
@@ -711,12 +810,12 @@ export class CommitGenerator {
             );
         } else {
             const { confirm } = await import('@inquirer/prompts');
-            const ok = await confirm({
+            const confirmed = await confirm({
                 message: `Push ${commitCount} commit(s) to ${remote}/${currentBranch}?` +
                     (isProtectedBranch ? ' [PROTECTED BRANCH]' : ''),
                 default: false,
             });
-            if (!ok) {
+            if (!confirmed) {
                 log.info('Push cancelled by user');
                 return ok(false);
             }
@@ -814,7 +913,7 @@ export class CommitGenerator {
 
         // Only show header in TTY with color
         if (useFancy && !this.options.quiet && !this.options.silent) {
-            log.header('Commit Wizard', `v${this.projectConfig.version}`);
+            log.header('Keryx', `v${this.projectConfig.version}`);
             log.divider();
         }
 
@@ -909,6 +1008,13 @@ export class CommitGenerator {
             return err({ type: 'PARSE_ERROR', message: 'No valid commit proposals parsed' } as any);
         }
 
+        // Advisory, never blocking: a feat/fix proposal without a
+        // Release-Note trailer leaves the release changelog without
+        // prose for that commit.
+        for (const warning of missingReleaseNoteWarnings(proposals)) {
+            log.warn(warning);
+        }
+
         // Show proposals - use simple format in CI, fancy in TTY
         if (useFancy) {
             log.cliTable(proposals.map((p, i) => ({
@@ -926,7 +1032,7 @@ export class CommitGenerator {
         if (useFancy) {
             for (const p of proposals) {
                 log.box(
-                    [p.title, '', p.description, p.technical ? `\n<technical>\n${p.technical}\n</technical>` : '', p.changelog ? `\n<changelog>\n${p.changelog}\n</changelog>` : ''].filter(Boolean).join('\n'),
+                    [p.title, '', p.description, p.technical ? `\n<technical>\n${p.technical}\n</technical>` : '', p.changelog ? `\n<changelog>\n${p.changelog}\n</changelog>` : '', p.trailers?.length ? `\n${formatTrailersBlock(p.trailers)}` : ''].filter(Boolean).join('\n'),
                     { title: `Commit #${proposals.indexOf(p) + 1}`, borderStyle: 'single', padding: 1 },
                 );
             }
@@ -1021,21 +1127,29 @@ export class CommitGenerator {
 if (import.meta.main) {
     const args = process.argv.slice(2);
 
+    // v3: subcommands. `release-notes` is headless and propose-only;
+    // it exits internally, never falling through to commit generation.
+    if (args[0] === 'release-notes') {
+        await runReleaseNotesCli(args.slice(1));
+    }
+
     // v2.1: --version / -V early-exit. Writes to stdout (not stderr)
     // because agents that probe `--version` want to capture it cleanly.
     if (args.includes('--version') || args.includes('-V')) {
-        process.stdout.write(`gemini-commit-wizard v${WIZARD_VERSION}\n`);
+        process.stdout.write(`keryx v${WIZARD_VERSION}\n`);
         process.exit(ExitCode.SUCCESS);
     }
 
     if (args.includes('--help') || args.includes('-h')) {
-        log.header('Commit Wizard', 'AI-powered commit generation');
+        log.header('Keryx', 'AI-powered commit generation');
         log.blank();
-        log.info('Usage: bun src/commit-generator.ts [options]');
+        log.info('Usage: keryx [options]');
+        log.info('       keryx release-notes [options]');
         log.blank();
         log.info('Options:');
-        log.info('  --provider <name>            Provider: gemini-cli|gemini-sdk|groq|openrouter');
-        log.info('  --model <model-id>           Model override');
+        log.info('  --provider <name>            Text provider: agy|gemini-cli|gemini-sdk|groq|openrouter');
+        log.info('  --model <model-id>           Text model override');
+        log.info('  --decision-provider <name>   Decision provider: jev (opt-in; reads TYPESAFE_API_KEY)');
         log.info('  --auto-approve               Execute commits automatically');
         log.info('  --no-push                    Skip git push');
         log.info('  --context <description>      Describe your changes');
@@ -1053,6 +1167,10 @@ if (import.meta.main) {
         log.info('  --list-providers             Show available providers');
         log.info('  --version, -V                Print version and exit');
         log.info('  --help, -h                   Show this help');
+        log.blank();
+        log.info('Subcommands:');
+        log.info('  release-notes                Propose missing release-note trailers for a styx');
+        log.info('                               release plan (see keryx release-notes --help)');
         log.blank();
         log.info('Staging modes (mutually exclusive):');
         log.info('  --staged-only                Only use files already in the index');
@@ -1077,9 +1195,10 @@ if (import.meta.main) {
     if (args.includes('--list-providers')) {
         const caps = detectTerminalCapabilities();
         const providers = listProviders();
+        const decisionProviders = listDecisionProviders();
 
         if (shouldUseFancyOutput(caps)) {
-            log.header('Available Providers');
+            log.header('Text providers (body writer)');
             log.blank();
             log.cliTable(
                 providers.map(p => ({
@@ -1089,9 +1208,26 @@ if (import.meta.main) {
                     requirement: p.available ? '-' : p.requirement,
                 })),
             );
+            log.blank();
+            log.header('Decision providers (classifier)');
+            log.blank();
+            log.cliTable(
+                decisionProviders.map(p => ({
+                    status: p.available ? 'ready' : 'missing',
+                    provider: p.name,
+                    id: p.id,
+                    requirement: p.available ? '-' : p.requirement,
+                })),
+            );
         } else {
+            log.info('Text providers:');
             for (const p of providers) {
-                log.info(`${p.available ? '✓' : '✗'} ${p.id.padEnd(12)} ${p.name}`);
+                log.info(`  ${p.available ? '✓' : '✗'} ${p.id.padEnd(12)} ${p.name}`);
+            }
+            log.blank();
+            log.info('Decision providers:');
+            for (const p of decisionProviders) {
+                log.info(`  ${p.available ? '✓' : '✗'} ${p.id.padEnd(12)} ${p.name}`);
             }
         }
         log.blank();
@@ -1108,7 +1244,9 @@ if (import.meta.main) {
         const envelope = buildJsonEnvelope(result, options.dryRun ?? false);
         writeJson(envelope);
     } else if (isErr(result)) {
-        log.error(result.error.message);
+        // Same write-then-exit hazard as release-notes: log.error's async
+        // write is dropped when stderr is a pipe, so write synchronously.
+        process.stderr.write(`${result.error.message}\n`);
     }
 
     // v2.1: map the domain error to a distinct exit code so agents

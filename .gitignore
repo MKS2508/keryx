@@ -43,3 +43,5 @@ Thumbs.db
 
 # Git
 .git/
+.claude/last-active.json
+.claude/rules/glossary.md

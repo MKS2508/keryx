@@ -25,7 +25,27 @@ import { spawnSync } from 'child_process';
 import logger from '@mks2508/better-logger';
 // Alias so the file's existing `log.xxx(...)` call sites stay unchanged.
 const log = logger;
-import type { IGitFileStatus } from './types/git.types.js';
+
+/**
+ * Status information for a single file in the git working tree.
+ *
+ * Lived in the deleted types/git.types.ts; staging is its only consumer
+ * since the git layer cleanup, so it is defined here now.
+ */
+interface IGitFileStatus {
+    /** Relative file path */
+    path: string;
+    /** Whether the file has staged changes */
+    staged: boolean;
+    /** Whether the file has unstaged changes */
+    unstaged: boolean;
+    /** Whether the file is untracked */
+    untracked: boolean;
+    /** Whether the file is deleted */
+    deleted: boolean;
+    /** New path if the file was renamed */
+    renamed?: string;
+}
 
 
 /**

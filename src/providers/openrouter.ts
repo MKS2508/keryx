@@ -55,9 +55,15 @@ export class OpenRouterProvider implements IAIProvider {
         const { OpenRouter } = await import('@openrouter/sdk');
         const client = new OpenRouter({ apiKey });
 
+        // @openrouter/sdk >= 0.10 nests the completion params under
+        // `chatGenerationParams`; a flat `model`/`messages` payload fails
+        // the SDK's zod validation with "chatGenerationParams: expected
+        // object, received undefined".
         const result = await client.chat.send({
-            model: this.model,
-            messages: [{ role: 'user', content: prompt }],
+            chatGenerationParams: {
+                model: this.model,
+                messages: [{ role: 'user', content: prompt }],
+            },
         } as any);
 
         return (result as any).choices?.[0]?.message?.content || '';

@@ -7,22 +7,12 @@
  */
 
 import type { IGeminiPromptConfig, IStandardResponseFormat } from './types/index.js';
+import { parseTrailers, TRAILER_KEYS, type ITrailer } from './trailers.js';
+import { COMPLEXITY_RUBRIC } from './types/decision.types.js';
 
 // Re-export types for backward compatibility
 export type { IGeminiPromptConfig as GeminiPromptConfig } from './types/index.js';
 export type { IStandardResponseFormat as StandardResponseFormat } from './types/index.js';
-
-/**
- * Default project config used as fallback when no config is loaded.
- * @deprecated Use loadProjectConfig() from project-config.ts instead.
- */
-export const TPV_PROJECT_CONFIG = {
-    name: 'Unknown Project',
-    description: 'Software project',
-    version: '0.0.0',
-    techStack: ['TypeScript'] as const,
-    targetPlatform: 'Cross-platform',
-} as const;
 
 /**
  * Generate the standard prompt prefix with dynamic project context.
@@ -74,17 +64,38 @@ const STANDARD_PROMPT_SUFFIX = `
  * @returns Formatted commit analysis prompt
  */
 export function createCommitPrompt(config: IGeminiPromptConfig): string {
-    const { data, specificContext, projectContext, components, commitFormat } = config;
+    const { data, specificContext, projectContext, components, commitFormat, decisions } = config;
     const prefix = createPromptPrefix(projectContext);
 
     const componentsSection = components && components.length > 0
         ? `\n## Componentes del Proyecto (Monorepo)\n${components.map(c => `- **${c.id}** → \`${c.path}\` — ${c.name}`).join('\n')}\n\nUsa el ID del componente como "área" en el prefijo del commit (ej: \`feat(web):\`, \`fix(agent-backend):\`).\n`
         : '';
 
+    const decisionsSection = decisions
+        ? `\n## DECISIONES DEL CLASSIFIER (jev)
+
+Estas clasificaciones son la primera opinión. Úsalas como guía — puedes discrepar si tienes razón documentada en el diff.
+
+\`\`\`json
+${JSON.stringify(decisions, null, 2)}
+\`\`\`
+
+Notas de interpretación:
+- \`commit_type\`: sugerencia del prefijo Conventional Commits. Si discrepas, justifica en el body.
+- \`scope\`: ID de componente o "general". Solo aplica si la repo tiene monorepo / componentes.
+- \`breaking\` (0..1): probabilidad de que rompa contrato. Si > 0.5, incluye trailer \`Breaking:\`.
+- \`changelog_worthy\` (0..1): si > 0.5, rellena la sección \`<changelog>\` con entrada user-facing.
+- \`single_vs_multi\` (1 = un commit, 0 = varios): si < 0.5, genera varios \`### **Propuesta de Commit #N\`.
+- \`complexity\` (0..5 sobre ${COMPLEXITY_RUBRIC.join(' / ')}): si >= 3, la sección \`<technical>\` debe ser sustancial.
+
+`
+        : '';
+
     const titleLang = commitFormat?.titleLanguage || 'english';
     const bodyLang = commitFormat?.bodyLanguage || 'spanish';
     const includeTech = commitFormat?.includeTechnical !== false;
     const includeChangelog = commitFormat?.includeChangelog !== false;
+    const includeTrailers = commitFormat?.includeTrailers !== false;
 
     const formatInstructions = `
 ## REGLAS DE IDIOMA Y FORMATO
@@ -92,13 +103,22 @@ export function createCommitPrompt(config: IGeminiPromptConfig): string {
 - **Descripción/body del commit**: en **${bodyLang}**
 - **Sección <technical>**: ${includeTech ? 'OBLIGATORIA — incluir siempre' : 'OMITIR'}
 - **Sección <changelog>**: ${includeChangelog ? 'OBLIGATORIA — incluir siempre' : 'OMITIR'}
-`;
+- **Sección <trailers>**: ${includeTrailers ? 'SÓLO cuando aplique alguna clave (ver reglas de trailers)' : 'OMITIR'}
+${includeTrailers ? `
+## REGLAS DE TRAILERS DE RELEASE
+Al final del commit, cuando el cambio lo justifique, añade trailers en formato \`Clave: valor\` (una línea por clave). El pipeline de changelog los convierte en prosa de release:
+- \`Release-Note:\` — feat/fix con impacto visible para el usuario (una frase, cara de usuario).
+- \`Breaking:\` — el cambio rompe compatibilidad, contrato o comportamiento esperado (di qué se rompe y para quién).
+- \`Upgrade-Step:\` — actualizar exige un paso de migración (contrato, schema, config).
+- \`Security:\` — el cambio corrige o endurece seguridad.
+Si ninguna clave aplica, omite la sección \`<trailers>\` entera. Nunca inventes claves fuera de: ${TRAILER_KEYS.join(', ')}.
+` : ''}`;
 
     return `${prefix}
 ${componentsSection}
 # ANÁLISIS DE COMMITS
 ${formatInstructions}
-## Datos del Análisis
+${decisionsSection}## Datos del Análisis
 ${JSON.stringify(data, null, 2)}
 
 ## Contexto Adicional
@@ -130,7 +150,13 @@ ${includeChangelog ? `
 <changelog>
 ## [Tipo] [Emoji]
 [Entrada para changelog de la app, optimizada para mostrar al usuario]
-</changelog>` : ''}
+</changelog>` : ''}${includeTrailers ? `
+<trailers>
+Release-Note: [sólo si el commit tiene impacto visible para el usuario]
+Breaking: [sólo si rompe compatibilidad o contrato]
+Upgrade-Step: [sólo si actualizar exige un paso de migración]
+Security: [sólo si es un cambio de seguridad]
+</trailers>` : ''}
 \`\`\`
 
 ### **Archivos de la Propuesta #1** (OBLIGATORIO)
@@ -155,116 +181,6 @@ ${STANDARD_PROMPT_SUFFIX}`;
 }
 
 /**
- * Generate prompt for workflow assistant.
- * @param config - Prompt configuration with project context and data
- * @returns Formatted workflow prompt
- */
-export function createWorkflowPrompt(config: IGeminiPromptConfig): string {
-    const { data, specificContext, projectContext } = config;
-    const prefix = createPromptPrefix(projectContext);
-
-    return `${prefix}
-
-# ASISTENTE DE WORKFLOW
-
-## Solicitud del Usuario
-"${specificContext}"
-
-## Contexto del Proyecto Actual
-${JSON.stringify(data, null, 2)}
-
----
-
-## FORMATO DE RESPUESTA REQUERIDO
-
-\`\`\`markdown
-🎯 **ANÁLISIS**: [Descripción del tipo de trabajo detectado]
-📊 **IMPACTO**: [Áreas afectadas y alcance del cambio]
-🚀 **RECOMENDACIÓN**: [Tipo de versión y estrategia recomendada]
-
-## 🖥️ COMANDOS PARA macOS
-\`\`\`bash
-# [Descripción del primer comando]
-[comando exacto con parámetros]
-
-# [Descripción del segundo comando]
-[segundo comando exacto]
-\`\`\`
-
-## 🐧 COMANDOS PARA LINUX ARM (después de macOS)
-\`\`\`bash
-# SSH y preparación
-ssh user@raspberry-pi
-git pull origin master && bun install
-
-# [Descripción del build ARM]
-[comandos específicos de ARM]
-\`\`\`
-
-## ✅ VERIFICACIONES AUTOMÁTICAS
-- [Lista de verificaciones que se ejecutarán]
-\`\`\`
-
-${STANDARD_PROMPT_SUFFIX}`;
-}
-
-/**
- * Generate prompt for automatic releases.
- * @param config - Prompt configuration with project context and data
- * @returns Formatted release analysis prompt
- */
-export function createReleasePrompt(config: IGeminiPromptConfig): string {
-    const { data, specificContext, projectContext } = config;
-    const prefix = createPromptPrefix(projectContext);
-
-    return `${prefix}
-
-# ANÁLISIS DE RELEASE
-
-## Información de la Release
-${JSON.stringify(data, null, 2)}
-
-## Contexto Específico
-${specificContext || 'Release automática'}
-
----
-
-## FORMATO DE RESPUESTA REQUERIDO
-
-\`\`\`markdown
-# 📦 ANÁLISIS DE RELEASE
-
-## 🎯 RESUMEN
-[Descripción de los cambios principales incluidos en esta release]
-
-## 📋 CHANGELOG GENERADO
-
-### ✨ Features
-[Lista de nuevas funcionalidades]
-
-### 🐛 Fixes
-[Lista de correcciones de bugs]
-
-### 🚀 Improvements
-[Lista de mejoras]
-
-### 🔧 Technical
-[Cambios técnicos internos]
-
-## 🏷️ INFORMACIÓN DE VERSIÓN
-- **Versión**: [versión calculada]
-- **Prefijo**: [alpha/beta/rc/stable]
-- **Canal OTA**: [dev/beta/stable]
-- **Tipo de cambio**: [major/minor/patch]
-
-## 📝 NOTAS DE RELEASE
-[Texto descriptivo para usuarios finales]
-\`\`\`
-
-${STANDARD_PROMPT_SUFFIX}`;
-}
-
-/**
  * Generic parser for Gemini AI responses.
  * Extracts structured data from formatted markdown responses.
  */
@@ -279,6 +195,7 @@ export class GeminiResponseParser {
         description: string;
         technical: string;
         changelog: string;
+        trailers: ITrailer[];
         files: string[];
     }> {
         const proposals: Array<{
@@ -286,6 +203,7 @@ export class GeminiResponseParser {
             description: string;
             technical: string;
             changelog: string;
+            trailers: ITrailer[];
             files: string[];
         }> = [];
 
@@ -402,6 +320,7 @@ export class GeminiResponseParser {
         description: string;
         technical: string;
         changelog: string;
+        trailers: ITrailer[];
         files: string[];
     } | null {
         const lines = content.split('\n');
@@ -421,6 +340,7 @@ export class GeminiResponseParser {
         let description = '';
         let technical = '';
         let changelog = '';
+        let trailersRaw = '';
         let currentSection = 'description';
 
         for (let i = titleIndex + 1; i < lines.length; i++) {
@@ -438,6 +358,12 @@ export class GeminiResponseParser {
             } else if (line.includes('</changelog>')) {
                 currentSection = 'none';
                 continue;
+            } else if (line.includes('<trailers>')) {
+                currentSection = 'trailers';
+                continue;
+            } else if (line.includes('</trailers>')) {
+                currentSection = 'none';
+                continue;
             }
 
             if (currentSection === 'description' && line.trim()) {
@@ -446,6 +372,8 @@ export class GeminiResponseParser {
                 technical += line + '\n';
             } else if (currentSection === 'changelog') {
                 changelog += line + '\n';
+            } else if (currentSection === 'trailers') {
+                trailersRaw += line + '\n';
             }
         }
 
@@ -454,49 +382,8 @@ export class GeminiResponseParser {
             description: description.trim(),
             technical: technical.trim(),
             changelog: changelog.trim(),
+            trailers: parseTrailers(trailersRaw),
             files: [],
-        };
-    }
-
-    /**
-     * Parse workflow response into standard format.
-     * @param response - Raw AI workflow response
-     * @returns Parsed workflow data
-     */
-    static parseWorkflowResponse(response: string): {
-        analysis: string;
-        impact: string;
-        recommendation: string;
-        macosCommands: string[];
-        linuxCommands: string[];
-        verifications: string[];
-    } {
-        const analysisMatch = response.match(/🎯\s*\*\*ANÁLISIS\*\*:\s*(.+)/);
-        const impactMatch = response.match(/📊\s*\*\*IMPACTO\*\*:\s*(.+)/);
-        const recommendationMatch = response.match(/🚀\s*\*\*RECOMENDACIÓN\*\*:\s*(.+)/);
-
-        const macosSection = response.match(/##\s*🖥️\s*COMANDOS PARA macOS\s*```bash\s*([\s\S]*?)\s*```/);
-        const macosCommands = macosSection ? macosSection[1].split('\n').filter(line =>
-            line.trim() && !line.startsWith('#'),
-        ) : [];
-
-        const linuxSection = response.match(/##\s*🐧\s*COMANDOS PARA LINUX ARM[\s\S]*?```bash\s*([\s\S]*?)\s*```/);
-        const linuxCommands = linuxSection ? linuxSection[1].split('\n').filter(line =>
-            line.trim() && !line.startsWith('#'),
-        ) : [];
-
-        const verificationsSection = response.match(/##\s*✅\s*VERIFICACIONES AUTOMÁTICAS\s*([\s\S]*?)```/);
-        const verifications = verificationsSection ? verificationsSection[1].split('\n').filter(line =>
-            line.trim().startsWith('-'),
-        ).map(line => line.replace(/^-\s*/, '')) : [];
-
-        return {
-            analysis: analysisMatch?.[1] || 'No disponible',
-            impact: impactMatch?.[1] || 'No disponible',
-            recommendation: recommendationMatch?.[1] || 'No disponible',
-            macosCommands,
-            linuxCommands,
-            verifications,
         };
     }
 }

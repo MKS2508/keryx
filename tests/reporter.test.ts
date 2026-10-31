@@ -23,8 +23,56 @@ import {
 import type { ResultError } from '@mks2508/no-throw';
 import type { CommitErrorCode, ICommitResult } from '../src/types/index';
 import { ok, err, resultError } from '@mks2508/no-throw';
+import { CommitGenerator } from '../src/commit-generator';
+import type { IAIProvider } from '../src/types/index';
+import { createTestRepo, type ITestRepo } from './test-utils';
 
 const WIZARD_PATH = join(__dirname, '..', 'src', 'commit-generator.ts');
+
+/**
+ * Hermetic IAIProvider: returns a fixed, well-formed proposal response
+ * and optionally captures every prompt it receives.
+ */
+function stubProvider(opts: { capture?: string[] } = {}): IAIProvider {
+    return {
+        name: 'Stub Provider',
+        id: 'gemini-sdk',
+        model: 'stub-1',
+        isAvailable: () => true,
+        generate: async (prompt: string) => {
+            opts.capture?.push(prompt);
+            return [
+                '### **ANÁLISIS PRINCIPAL**',
+                '',
+                'Cambio único.',
+                '',
+                '---',
+                '',
+                '### **Propuesta de Commit #1**',
+                '',
+                '```markdown',
+                'feat(notes): track notes file',
+                '',
+                'Añade el fichero de notas al repo.',
+                '',
+                '<trailers>',
+                'Release-Note: notas persistentes en el repo',
+                '</trailers>',
+                '```',
+                '',
+                '### **Archivos de la Propuesta #1** (OBLIGATORIO)',
+                '',
+                '```files',
+                'notes.txt',
+                '```',
+                '',
+                '---',
+                '',
+                '**DECISIÓN**: un solo cambio lógico.',
+            ].join('\n');
+        },
+    };
+}
 
 describe('reporter — ExitCode mapping', () => {
     it('maps NO_CHANGES to 2', () => {
@@ -149,7 +197,7 @@ describe('CLI — --version flag', () => {
     it('prints version to stdout and exits 0', () => {
         const r = spawnSync('bun', [WIZARD_PATH, '--version'], { encoding: 'utf-8' });
         expect(r.status).toBe(0);
-        expect(r.stdout).toMatch(/^gemini-commit-wizard v\d+\.\d+\.\d+/);
+        expect(r.stdout).toMatch(/^keryx v\d+\.\d+\.\d+/);
         // no human noise on stderr
         expect(r.stderr).not.toContain('Commit Wizard');
     });
@@ -157,7 +205,7 @@ describe('CLI — --version flag', () => {
     it('-V also prints version', () => {
         const r = spawnSync('bun', [WIZARD_PATH, '-V'], { encoding: 'utf-8' });
         expect(r.status).toBe(0);
-        expect(r.stdout).toMatch(/^gemini-commit-wizard v\d+\.\d+\.\d+/);
+        expect(r.stdout).toMatch(/^keryx v\d+\.\d+\.\d+/);
     });
 });
 
@@ -196,29 +244,43 @@ describe('CLI — --json output', () => {
         expect(envelope.dryRun).toBe(false);
     });
 
-    it('--json --dry-run on a dirty repo parses a proposal list without committing', () => {
-        writeFileSync(join(tmpDir, 'untracked.txt'), 'hello\n');
+    // Hermetic rewrite: the AI response comes from an injected provider
+    // (providerInstance seam) instead of a real API, so this runs without
+    // keys or network while still exercising staging → analysis → parse →
+    // envelope over a real tmp git repo.
+    it('dry-run on a dirty repo parses a proposal list without committing', async () => {
+        const repo: ITestRepo = createTestRepo();
+        try {
+            repo.writeFile('notes.txt', 'hello\n');
 
-        const r = spawnSync('bun', [
-            WIZARD_PATH,
-            '--json', '--agent', '--all', '--dry-run',
-        ], { cwd: tmpDir, encoding: 'utf-8', timeout: 30_000 });
+            const generator = new CommitGenerator({
+                projectRoot: repo.path,
+                isAgent: true,
+                stagingMode: 'all',
+                dryRun: true,
+                silent: true,
+                providerInstance: stubProvider(),
+            });
+            const result = await generator.generate();
 
-        // dry-run never commits, so exit code is 0 (success) or 5 (commit
-        // error from a malformed AI response); we just check that stdout
-        // is valid JSON either way.
-        expect([0, 5]).toContain(r.status);
-        const envelope = JSON.parse(r.stdout.trim());
-        expect(typeof envelope.ok).toBe('boolean');
-        if (envelope.ok) {
-            expect(envelope.dryRun).toBe(true);
-            expect(Array.isArray(envelope.proposals)).toBe(true);
-            expect(envelope.commitCount).toBe(0);
+            const envelope = buildJsonEnvelope(result, true);
+            expect(envelope.ok).toBe(true);
+            if (envelope.ok) {
+                expect(envelope.dryRun).toBe(true);
+                expect(Array.isArray(envelope.proposals)).toBe(true);
+                expect(envelope.proposals.length).toBeGreaterThan(0);
+                expect(envelope.proposals[0]!.files).toEqual(['notes.txt']);
+                expect(envelope.proposals[0]!.trailers).toEqual([
+                    { key: 'Release-Note', value: 'notas persistentes en el repo' },
+                ]);
+                expect(envelope.commitCount).toBe(0);
+            }
+
+            // And no commit was actually created
+            expect(repo.git(['log', '--oneline']).split('\n').length).toBe(1);
+        } finally {
+            repo.cleanup();
         }
-
-        // And no commit was actually created
-        const log = spawnSync('git', ['log', '--oneline'], { cwd: tmpDir, encoding: 'utf-8' });
-        expect(log.stdout.trim().split('\n').length).toBe(1); // only the initial commit
     });
 });
 
@@ -257,30 +319,31 @@ describe('CLI — --context-file', () => {
         expect(envelope.error.type).toBe('NO_CHANGES');
     });
 
-    it('reads context from a file when the file exists', () => {
-        // Write a context file OUTSIDE the repo to avoid polluting
-        // the staging tree, then point --context-file at it.
-        const ctxPath = join('/tmp', `gcw-ctx-source-${Date.now()}.md`);
-        writeFileSync(ctxPath, 'refactor: extract validation into helper\n');
-
+    // Hermetic rewrite: instead of probing the CLI's --context-file flag
+    // over a subprocess (which needed a live provider to get past the AI
+    // step), assert on the effect — the context text reaching the prompt.
+    it('passes the caller context through to the AI prompt', async () => {
+        const repo: ITestRepo = createTestRepo();
         try {
-            // Stage a single tracked file so the wizard actually runs
-            // (clean tree would short-circuit to NO_CHANGES).
-            writeFileSync(join(tmpDir, 'src.txt'), 'src\n');
-            spawnSync('git', ['add', '--', 'src.txt'], { cwd: tmpDir });
+            repo.writeFile('src.txt', 'src\n');
+            const prompts: string[] = [];
 
-            const r = spawnSync('bun', [
-                WIZARD_PATH,
-                '--json', '--agent', '--all', '--dry-run',
-                '--context-file', ctxPath,
-            ], { cwd: tmpDir, encoding: 'utf-8', timeout: 30_000 });
+            const generator = new CommitGenerator({
+                projectRoot: repo.path,
+                isAgent: true,
+                stagingMode: 'all',
+                dryRun: true,
+                silent: true,
+                context: 'refactor: extract validation into helper',
+                providerInstance: stubProvider({ capture: prompts }),
+            });
+            const result = await generator.generate();
+            expect(result.ok).toBe(true);
 
-            expect([0, 5]).toContain(r.status);
-            const envelope = JSON.parse(r.stdout.trim());
-            expect(envelope.ok).toBe(true);
-            expect(envelope.dryRun).toBe(true);
+            expect(prompts.length).toBe(1);
+            expect(prompts[0]).toContain('refactor: extract validation into helper');
         } finally {
-            try { spawnSync('rm', ['-f', ctxPath]); } catch {}
+            repo.cleanup();
         }
     });
 });

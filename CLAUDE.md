@@ -1,10 +1,16 @@
-# Gemini Commit Wizard - AI-Powered Commit Generation
+# Keryx - AI-Powered Commit Generation
+
+v3 of the former `gemini-commit-wizard`. Same multi-provider commit engine,
+agent-first: headless CLI, JSON envelopes, exit codes, and release-note
+trailers that feed a deterministic changelog pipeline (styx-style:
+`bun run release:plan`).
 
 ## Architecture
 
 ### Multi-Provider System
 
-The wizard supports 4 AI providers via a common `IAIProvider` interface in `src/providers.ts`:
+4 AI providers via a common `IAIProvider` interface (`src/types/provider.types.ts`,
+implementations in `src/providers/`):
 
 | Provider | Class | Env Variable | Default Model |
 |----------|-------|-------------|---------------|
@@ -21,6 +27,9 @@ The wizard supports 4 AI providers via a common `IAIProvider` interface in `src/
 
 Provider selection: `--provider <name>`, `COMMIT_WIZARD_PROVIDER` env var, or `.commit-wizard.json` `provider` field.
 
+New providers slot into `PROVIDER_MAP` in `src/providers/index.ts` — one entry
+per name, each mapping to a factory `(model?) => IAIProvider`.
+
 ### Project Configuration
 
 `src/project-config.ts` loads config from (in priority order):
@@ -35,15 +44,19 @@ Components are used as commit scope areas. CommitFormat controls title/body lang
 ## Project Structure
 
 ```
-gemini-commit-wizard/
+keryx/
 ├── src/
-│   ├── providers.ts          # IAIProvider interface + 4 implementations + factory
+│   ├── providers/            # IAIProvider implementations + factory
+│   ├── types/                # Domain type definitions
+│   ├── utils/                # Terminal capabilities + output formatting
 │   ├── project-config.ts     # Config loader (.commit-wizard.json / package.json)
-│   ├── commit-generator.ts   # Core engine: analyzeWithAI(), git operations
-│   ├── commit-ui.ts          # Interactive UI: macOS/Linux dialogs, terminal fallback
+│   ├── commit-generator.ts   # Core engine: analyzeWithAI(), git operations, CLI
+│   ├── staging.ts            # Staging decision + application (spawnSync git)
+│   ├── reporter.ts           # Exit codes + JSON envelopes for agents
+│   ├── setup-wizard.ts       # .commit-wizard.json generator (keryx-init)
 │   ├── prompt-templates.ts   # Prompt construction + response parsing
-│   └── version-manager.ts    # Semantic versioning automation
-├── .run/                     # WebStorm run configurations
+│   └── version-manager.ts    # Semantic versioning automation (keryx-version)
+├── tests/                    # Vitest suite (hermetic, no API keys needed)
 └── .temp/                    # Temporary prompt/response files (git ignored)
 ```
 
@@ -64,7 +77,19 @@ gemini-commit-wizard/
 ## [Type] [Emoji]
 [User-facing changelog entry]
 </changelog>
+
+Release-Note: [user-facing sentence, when justified]
 ```
+
+### Release-Note Trailers
+
+`src/trailers.ts` owns the trailer vocabulary: `Release-Note`, `Breaking`,
+`Upgrade-Step`, `Security` (one `Key: value` line each, appended at the end
+of the commit message, git trailer convention). The key set mirrors the
+styx changelog pipeline (`scripts/release/version.ts` `trailers()`) — do not
+diverge. feat/fix proposals without `Release-Note` get an advisory WARN via
+`missingReleaseNoteWarnings()`; nothing is ever blocked. Toggle with
+`commitFormat.includeTrailers`.
 
 ### Valid Types
 - `feat(` - New functionality
@@ -103,15 +128,28 @@ Changelog entry
 **DECISION**: [Why single vs multiple commits]
 ```
 
+## release-notes subcommand
+
+`keryx release-notes` (src/release-notes.ts) proposes missing release-note
+trailers for the commits of a styx release plan. Contract with styx is
+JSON-over-subprocess: shell out to `bun run release:plan --json` in the
+styx root (`--styx-root` flag or `styx.root` in .commit-wizard.json), read
+commit bodies with plain git. NEVER import styx code.
+
+Propose-only, always: keryx never amends commits nor writes changelogs —
+prose enters styx through the release PR (dec-0123 D5 posture). Detection
+(`missingTrailersFor`) mirrors styx semantics: feat/fix → Release-Note,
+`!` → Breaking, `sec` → Security, ADDED `migrations/*.sql` → Upgrade-Step.
+Range passthrough `--from/--to/--prerelease` exists because tag-less
+histories plan from root and produce unbounded candidate sets. Deps
+(`runPlan`/`gitBody`/`gitFiles`/`createProvider`) are injectable — tests
+run with an embedded plan fixture, no subprocess.
+
 ## Commands
 
-### Commit Generation
 ```bash
-# Interactive UI (auto-detects provider)
-bun src/commit-ui.ts
-
-# Quick mode
-bun src/commit-ui.ts --quick
+# Headless (auto-detects provider)
+bun src/commit-generator.ts
 
 # Specific provider
 bun src/commit-generator.ts --provider groq
@@ -124,14 +162,15 @@ bun src/commit-generator.ts --auto-approve --no-push
 
 # List providers
 bun src/commit-generator.ts --list-providers
-```
 
-### Version Management
-```bash
+# Version management
 bun src/version-manager.ts              # Analyze and bump
 bun src/version-manager.ts --type minor # Force minor bump
 bun src/version-manager.ts --prefix alpha # Pre-release
 ```
+
+Installed bins: `keryx` / `keryx-gen` (commit core), `keryx-init` (setup wizard),
+`keryx-version` (version manager).
 
 ## SDK Notes
 
@@ -157,14 +196,21 @@ bun src/version-manager.ts --prefix alpha # Pre-release
 - **AI SDKs**: `@google/genai`, `groq-sdk`, `@openrouter/sdk` (all bundled)
 - **Git**: Required for change analysis
 
+### Checks
+```bash
+bun install
+bun run typecheck
+bun run test
+```
+
 ### Publishing
 ```bash
-# Bump version in package.json
+# Bump version in package.json (WIZARD_VERSION derives from it)
 bun install
 npm publish
 ```
 
-Note: npm strips `.ts` bin entries. Consumers should use `bun node_modules/gemini-commit-wizard/src/commit-ui.ts` in their scripts.
+Note: npm strips `.ts` bin entries. Consumers should use `bun node_modules/keryx/src/commit-generator.ts` in their scripts.
 
 ## Author Guidelines
 

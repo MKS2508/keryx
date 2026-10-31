@@ -3,6 +3,8 @@
  * @module types/commit
  */
 
+import type { ITrailer } from '../trailers.js';
+
 /**
  * Represents a single file change in the git diff.
  */
@@ -68,6 +70,8 @@ export interface ICommitProposal {
     technical: string;
     /** Changelog section content */
     changelog: string;
+    /** Release-note trailers appended after the changelog section */
+    trailers?: ITrailer[];
     /** Specific files to include in this commit (undefined = all staged) */
     files?: string[];
 }

@@ -1,17 +1,14 @@
 {
-  "name": "gemini-commit-wizard",
-  "version": "2.1.1",
-  "description": "AI-powered Git commit generation with multi-provider support (Gemini, Groq, OpenRouter)",
+  "name": "keryx",
+  "version": "3.0.0",
+  "description": "AI-powered Git commit generation. v3.1 hybrid pipeline: jev (TypeSafe System One Model) classifies the diff, agy (CLI LLM) writes the commit body. Release-note trailers are also jev-refined.",
   "main": "src/commit-generator.ts",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./cli": "./src/commit-ui.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
-    "commit": "bun src/commit-ui.ts",
-    "commit:quick": "bun src/commit-ui.ts --quick",
-    "commit:manual": "bun src/commit-generator.ts",
+    "commit": "bun src/commit-generator.ts",
     "commit:auto": "bun src/commit-generator.ts --auto-approve",
     "commit:dry": "bun src/commit-generator.ts --dry-run",
     "init": "bun src/setup-wizard.ts",
@@ -30,9 +27,13 @@
     "git",
     "commit",
     "ai",
-    "gemini",
-    "groq",
-    "openrouter",
+    "agy",
+    "jev",
+    "typesafe",
+    "decision-provider",
+    "hybrid-pipeline",
+    "release-notes",
+    "trailers",
     "claude",
     "llama",
     "multi-provider",
@@ -46,29 +47,28 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/MKS2508/gemini-commit-wizard.git"
+    "url": "https://github.com/MKS2508/keryx.git"
   },
   "bugs": {
-    "url": "https://github.com/MKS2508/gemini-commit-wizard/issues"
+    "url": "https://github.com/MKS2508/keryx/issues"
   },
-  "homepage": "https://github.com/MKS2508/gemini-commit-wizard#readme",
+  "homepage": "https://github.com/MKS2508/keryx#readme",
   "engines": {
     "bun": ">=1.0.0",
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "^2.1.87",
     "@google/genai": "^1.47.0",
     "@inquirer/prompts": "^8.3.2",
     "@mks2508/better-logger": "0.18.2-alpha.1",
     "@mks2508/no-throw": "^0.1.0",
     "@openrouter/sdk": "^0.10.2",
-    "groq-sdk": "^1.1.2",
-    "octokit": "^5.0.5",
-    "simple-git": "^3.33.0"
+    "@typesafe-ai/sdk": "^0.6.0",
+    "groq-sdk": "^1.1.2"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "bun-types": "^1.4.2",
     "typescript": "^5.0.0",
     "vitest": "^2.0.0"
   },
@@ -83,9 +83,9 @@
     "LICENSE"
   ],
   "bin": {
-    "gemini-commit": "./src/commit-ui.ts",
-    "gemini-commit-gen": "./src/commit-generator.ts",
-    "gemini-commit-init": "./src/setup-wizard.ts",
-    "gemini-version": "./src/version-manager.ts"
+    "keryx": "./src/commit-generator.ts",
+    "keryx-gen": "./src/commit-generator.ts",
+    "keryx-init": "./src/setup-wizard.ts",
+    "keryx-version": "./src/version-manager.ts"
   }
 }

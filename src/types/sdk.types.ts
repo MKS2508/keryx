@@ -3,7 +3,12 @@
  * @module types/sdk
  */
 
-import type { ProviderName } from './provider.types.js';
+import type {
+    DecisionProviderName,
+    IAIProvider,
+    IDecisionProvider,
+    ProviderName,
+} from './provider.types.js';
 import type { ICommitProposal } from './commit.types.js';
 import type { Result } from '@mks2508/no-throw';
 
@@ -35,6 +40,25 @@ export interface ICommitGeneratorOptions {
     provider?: ProviderName;
     /** Override the default model for the selected provider */
     model?: string;
+    /**
+     * Pre-built provider instance. Wins over `provider`/`model` and skips
+     * the factory + availability check entirely — the seam tests and SDK
+     * consumers use to run hermetically (no API keys, no network).
+     */
+    providerInstance?: IAIProvider;
+    /**
+     * Decision / classification provider to use. v3.1 hybrid pipeline.
+     * Resolved by `createDecisionProvider()` when `decisionProviderInstance`
+     * is not set. The factory checks availability; if missing, keryx
+     * runs text-only (no classification).
+     */
+    decisionProvider?: DecisionProviderName;
+    /**
+     * Pre-built decision provider instance (test seam, parallel to
+     * `providerInstance`). Wins over `decisionProvider` and skips the
+     * factory + availability check entirely.
+     */
+    decisionProviderInstance?: IDecisionProvider;
     /**
      * Auto-approve commit proposals without prompting.
      * @defaultValue false (in v2.0; was true in v1.x)
@@ -129,6 +153,7 @@ export type CommitErrorCode =
     | 'PARSE_ERROR'
     | 'CONFIG_ERROR'
     | 'STAGING_ERROR'
+    | 'PUSH_CANCELLED'
     | 'COMMIT_EXEC_ERROR'
     | 'NO_CHANGES'
     | 'CANCELLED';

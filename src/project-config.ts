@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * Loadable project configuration for gemini-commit-wizard.
+ * Loadable project configuration for keryx.
  *
  * Loads config from (in priority order):
  * 1. `.commit-wizard.json` in project root
@@ -85,9 +85,11 @@ function fillDefaults(partial: Partial<IProjectConfig>): IProjectConfig {
             bodyLanguage: partial.commitFormat?.bodyLanguage || 'spanish',
             includeTechnical: partial.commitFormat?.includeTechnical !== false,
             includeChangelog: partial.commitFormat?.includeChangelog !== false,
+            includeTrailers: partial.commitFormat?.includeTrailers !== false,
         },
         provider: partial.provider,
         model: partial.model,
+        styx: partial.styx,
     };
 }
 

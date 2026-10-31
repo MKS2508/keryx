@@ -8,7 +8,7 @@ import type { IAIProvider, ProviderName } from '../types/index.js';
 
 /**
  * Provider that pipes prompts to the local `gemini` CLI binary.
- * This is the original provider from gemini-commit-wizard v1.0.
+ * This is the original provider from the v1.0 wizard.
  * No API key required — just needs the `gemini` binary in PATH.
  *
  * @example
